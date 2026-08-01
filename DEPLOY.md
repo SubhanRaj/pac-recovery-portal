@@ -42,13 +42,16 @@ it to count as a genuine submission. The real Excel re-baseline (`districts.tota
   to `main` when `api/**` changed, or via `workflow_dispatch`. Requires
   `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` in GitHub Secrets.
 
+**`deploy.yml` is currently broken and failing on every push** — the repo was renamed, and the
+`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` GitHub Secrets need to be re-added under the new
+repo name before it'll run again. Until that's done, deploys are manual only — run
+`pnpm run deploy` from `api/` yourself after pushing, don't assume a push to `main` actually
+reached production. `ci.yml` (typecheck/build) is unaffected and still runs normally.
+
 ```bash
 gh workflow run deploy.yml
 gh run watch <run-id> --exit-status           # follow it live
 ```
-
-Manual `wrangler` commands below still work for local development and emergency redeploys, but
-treat GitHub Actions as the source of truth for what's actually live.
 
 ## One-time setup (already done — for reference / disaster recovery)
 
