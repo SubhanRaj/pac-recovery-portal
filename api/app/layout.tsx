@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import { SITE_TITLE_EN, DATA_PERIOD_EN } from "@/lib/site";
 import "./globals.css";
@@ -40,6 +40,13 @@ export const metadata: Metadata = {
     title: TITLE,
     description: DESCRIPTION,
   },
+  manifest: "/manifest.json",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#1d4ed8",
 };
 
 export default function RootLayout({

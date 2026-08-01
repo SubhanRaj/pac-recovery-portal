@@ -5,3 +5,6 @@ FRONTEND_URL=http://localhost:3000
 # up-excise-spatial-revenue-optimizer project's RESEND_FROM_EMAIL, same Resend account).
 # Optional — falls back to Resend's shared sandbox sender (onboarding@resend.dev) if unset.
 FROM_EMAIL=noreply@mail.exciseup.in
+# The only admin email allowed to add/edit/remove other admins (/admin/users) — see
+# lib/auth-guard.ts's isOwnerEmail().
+OWNER_EMAIL=owner@example.com

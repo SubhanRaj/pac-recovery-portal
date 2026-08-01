@@ -17,10 +17,22 @@ change.** This project has live production data and real government users.
 | Custom domain | `https://pacrecovery.exciseup.in` — a Workers **Custom Domain** (`custom_domain: true` in `api/wrangler.jsonc`'s `routes`, not a plain path-pattern route), which auto-provisions its own DNS record on deploy |
 | Worker | `pac-recovery-portal` — serves the UI and `/api/*` both, `workers_dev: false` (no `*.workers.dev` URL) |
 | D1 database | `excise-bakaya-db` (id `667be1f3-7612-45c6-91e9-0a40a451c6ea`) |
-| Admin | `shubhanraj2002@gmail.com` (role `admin`, signs in via magic link) |
+| Admin accounts | seeded in `users` (role `admin`), sign in via magic link — see D1 directly for the current list, not documented here |
 
 Auth to Cloudflare: `pnpm exec wrangler whoami` (already logged in via OAuth on this machine).
 Re-auth elsewhere with `pnpm exec wrangler login`.
+
+### Pre-filled recovery figures (test data, not a real lock)
+
+The 59 districts that had a prior bakaya form period carry real recovery figures
+(`recovered_this_period`, `batte_khatte_*`, `court_stayed_amount`, `net_recoverable`) pulled from
+that old system's own report export — the source file is
+`scripts_and_data/Excise_Bakaya_Report_02-07-2026_12-39-31.xlsx`, backed up alongside a pre-import
+D1 snapshot in `scripts_and_data/backups/`. These rows are deliberately left **unlocked** with no
+`submitted_by_name` — nobody has actually submitted through this portal, so a DEO logging in today
+sees real historical numbers pre-filled but must still review and lock the period themselves for
+it to count as a genuine submission. The real Excel re-baseline (`districts.totalDues`/
+`collectedTillDate`, up to 31-Mar-2019) supersedes this once it's imported.
 
 ## CI/CD
 
@@ -67,7 +79,12 @@ echo -n "<value>" | pnpm exec wrangler secret put JWT_SECRET
 echo -n "<value>" | pnpm exec wrangler secret put RESEND_API_KEY
 echo -n "https://pacrecovery.exciseup.in" | pnpm exec wrangler secret put FRONTEND_URL
 echo -n "noreply@mail.exciseup.in" | pnpm exec wrangler secret put FROM_EMAIL
+echo -n "shubhanraj2002@gmail.com" | pnpm exec wrangler secret put OWNER_EMAIL
 ```
+
+`OWNER_EMAIL` gates `/admin/users` (see `CLAUDE.md`'s Auth section) — the one admin whose email
+matches this secret can add/edit/remove other admins; everyone else gets a 403 and doesn't see
+the link.
 
 List what's set (values are never shown): `pnpm exec wrangler secret list`.
 

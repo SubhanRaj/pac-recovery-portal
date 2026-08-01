@@ -4,17 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { formatIST } from "@/lib/format";
 import { useAdminData } from "@/lib/useAdminData";
-import AppHeader, { type NavLink } from "@/components/ui/AppHeader";
+import AppHeader, { adminNavLinks } from "@/components/ui/AppHeader";
 import Banner from "@/components/ui/Banner";
 import HelpPanel from "@/components/ui/HelpPanel";
 import Select from "@/components/ui/Select";
-
-const NAV_LINKS: NavLink[] = [
-  { label: "Dashboard", href: "/admin" },
-  { label: "Districts", href: "/admin/districts" },
-  { label: "Unlock Requests", href: "/admin/unlock-requests" },
-  { label: "Audit Log", href: "/admin/audit" },
-];
 
 type AuditRow = {
   id: number;
@@ -38,6 +31,9 @@ const EVENT_LABELS: Record<string, string> = {
   unlock_requested: "Unlock requested (DEO)",
   unlock_request_approved: "Unlock request approved",
   unlock_request_denied: "Unlock request denied",
+  admin_user_added: "Admin added",
+  admin_user_updated: "Admin updated",
+  admin_user_removed: "Admin removed",
 };
 
 // Raw metadata JSON keys, as actually written across every `auditLog` insert in api/app/api/**
@@ -51,12 +47,12 @@ const METADATA_KEY_LABELS: Record<string, string> = {
   updated: "Updated",
   errors: "Errors",
   totalRows: "Total rows",
-  newAdminEmail: "New admin email",
-  newAdminName: "New admin name",
-  targetAdminId: "Admin ID",
-  targetAdminEmail: "Admin email",
-  deletedAdminEmail: "Deleted admin email",
-  deletedAdminName: "Deleted admin name",
+  addedEmail: "Added email",
+  addedName: "Added name",
+  updatedEmail: "Updated email",
+  updatedName: "Updated name",
+  removedEmail: "Removed email",
+  removedName: "Removed name",
 };
 
 // Name/designation are captured at write time (see api/lib/audit.ts) — an admin's later name
@@ -89,6 +85,7 @@ export default function AuditLogPage() {
   // `/api/auth/me` guard and skip districts/onSync entirely, which is why its header used to
   // look/behave differently (no search box, no Sync button) from the other three.
   const { ready, profile, districts, sync, syncing, lastSyncedAt } = useAdminData();
+  const navLinks = adminNavLinks(profile?.isOwner);
   const [rows, setRows] = useState<AuditRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
@@ -132,7 +129,7 @@ export default function AuditLogPage() {
   if (!ready) {
     return (
       <div className="flex min-h-full flex-1 flex-col bg-slate-50 dark:bg-slate-950">
-        <AppHeader title="Audit Log" role="admin" profile={profile} navLinks={NAV_LINKS} onSync={sync} syncing={syncing} lastSyncedAt={lastSyncedAt} districts={districts} />
+        <AppHeader title="Audit Log" role="admin" profile={profile} navLinks={navLinks} onSync={sync} syncing={syncing} lastSyncedAt={lastSyncedAt} districts={districts} />
         <div className="w-full flex-1 px-4 py-6 sm:px-6 lg:px-[10%] xl:px-[5%] 2xl:px-[3%]">
           <div className="mb-4 flex flex-wrap items-center justify-end gap-1.5">
             <div className="h-8 w-32 animate-pulse rounded-md bg-slate-200 dark:bg-slate-800" />
@@ -150,7 +147,7 @@ export default function AuditLogPage() {
         title="Audit Log"
         role="admin"
         profile={profile}
-        navLinks={NAV_LINKS}
+        navLinks={navLinks}
         onSync={sync}
         syncing={syncing}
         lastSyncedAt={lastSyncedAt}

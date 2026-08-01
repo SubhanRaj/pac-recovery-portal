@@ -5,17 +5,10 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { formatIST } from "@/lib/format";
 import { useAdminData } from "@/lib/useAdminData";
 import { notifyToast } from "@/lib/alerts";
-import AppHeader, { type NavLink } from "@/components/ui/AppHeader";
+import AppHeader, { adminNavLinks } from "@/components/ui/AppHeader";
 import Banner from "@/components/ui/Banner";
 import HelpPanel from "@/components/ui/HelpPanel";
 import Select from "@/components/ui/Select";
-
-const NAV_LINKS: NavLink[] = [
-  { label: "Dashboard", href: "/admin" },
-  { label: "Districts", href: "/admin/districts" },
-  { label: "Unlock Requests", href: "/admin/unlock-requests" },
-  { label: "Audit Log", href: "/admin/audit" },
-];
 
 type RequestRow = {
   id: number;
@@ -57,6 +50,7 @@ async function promptResolveNote(action: "approve" | "deny", districtName: strin
 
 export default function UnlockRequestsPage() {
   const { ready, profile, districts, sync, syncing, lastSyncedAt } = useAdminData();
+  const navLinks = adminNavLinks(profile?.isOwner);
   const [rows, setRows] = useState<RequestRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,7 +98,7 @@ export default function UnlockRequestsPage() {
   if (!ready) {
     return (
       <div className="flex min-h-full flex-1 flex-col bg-slate-50 dark:bg-slate-950">
-        <AppHeader title="Unlock Requests" role="admin" profile={profile} navLinks={NAV_LINKS} onSync={sync} syncing={syncing} lastSyncedAt={lastSyncedAt} districts={districts} />
+        <AppHeader title="Unlock Requests" role="admin" profile={profile} navLinks={navLinks} onSync={sync} syncing={syncing} lastSyncedAt={lastSyncedAt} districts={districts} />
         <div className="w-full flex-1 px-4 py-6 sm:px-6 lg:px-[10%] xl:px-[5%] 2xl:px-[3%]">
           <div className="mb-4 flex items-center justify-end">
             <div className="h-9 w-40 animate-pulse rounded-md bg-slate-200 dark:bg-slate-800" />
@@ -121,7 +115,7 @@ export default function UnlockRequestsPage() {
         title="Unlock Requests"
         role="admin"
         profile={profile}
-        navLinks={NAV_LINKS}
+        navLinks={navLinks}
         onSync={sync}
         syncing={syncing}
         lastSyncedAt={lastSyncedAt}

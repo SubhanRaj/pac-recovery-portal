@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
-import { requireSession } from "@/lib/auth-guard";
+import { requireSession, isOwnerEmail } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { users, districts, pacDues, unlockRequests } from "@/db/schema";
 import { withErrorHandling } from "@/lib/with-error-handling";
@@ -9,12 +9,13 @@ import { withErrorHandling } from "@/lib/with-error-handling";
 // for why there are two separate cookies instead of one shared __session.
 //
 // Differs from the reference project structurally: lock state isn't a lifetime-once flag on
-// districts/users here — it's per (district, period) on pac_dues (see
-// pac-recovery-migration-plan.md §3), so "current period" for a DEO is just their district's
-// most recent pac_dues row (by period desc). No "Open Next Period" mechanic exists yet (§3's
-// provisionally-decided admin-action item isn't built), so today that's just the one row the
-// legacy-data migration seeded. No isOwner/OWNER_EMAIL concept — multi-admin /admin/users is
-// out of v1 scope (§6.2).
+// districts/users here — it's per (district, period) on pac_dues, so "current period" for a
+// DEO is just their district's most recent pac_dues row (by period desc). No "Open Next Period"
+// mechanic exists yet, so today that's just the one row the legacy-data migration seeded.
+//
+// isOwner mirrors the reference project's OWNER_EMAIL-secret pattern (not a DB column) — only
+// the admin whose email matches the OWNER_EMAIL secret sees/uses /admin/users, so ordinary
+// admins never see each other's identities. Always false for DEOs.
 export const GET = withErrorHandling("auth/me", async (req: NextRequest) => {
   const role = req.nextUrl.searchParams.get("role");
   if (role !== "admin" && role !== "deo") {
@@ -77,12 +78,15 @@ export const GET = withErrorHandling("auth/me", async (req: NextRequest) => {
     }
   }
 
+  const isOwner = role === "admin" && isOwnerEmail(row?.email);
+
   return NextResponse.json({
     ...session,
     email: row?.email ?? null,
     name: row?.name ?? null,
     designation: row?.designation ?? null,
     districtName: row?.districtName ?? null,
+    isOwner,
     currentPeriod,
     pendingUnlockRequest,
   });

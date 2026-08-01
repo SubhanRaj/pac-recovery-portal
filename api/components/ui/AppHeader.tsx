@@ -13,6 +13,19 @@ import ThemeToggle from "./ThemeToggle";
 export type NavLink = { label: string; href: string };
 export type SearchableDistrict = { id: number; districtName: string };
 
+// Shared by every /admin/* page so the "Admin Users" link only appears for the owner admin (see
+// ProfileMenu's isOwner doc) — ordinary admins never see it, in the nav or the dropdown.
+export function adminNavLinks(isOwner?: boolean): NavLink[] {
+  const links: NavLink[] = [
+    { label: "Dashboard", href: "/admin" },
+    { label: "Districts", href: "/admin/districts" },
+    { label: "Unlock Requests", href: "/admin/unlock-requests" },
+    { label: "Audit Log", href: "/admin/audit" },
+  ];
+  if (isOwner) links.push({ label: "Admin Users", href: "/admin/users" });
+  return links;
+}
+
 type Props = {
   title: string;
   role: "admin" | "deo";

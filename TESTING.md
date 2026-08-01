@@ -63,6 +63,10 @@ calling it done:
    confirm the header row is frozen and RC/dues columns are present with correct values.
 8. **Audit log** — confirm the lock, unlock-request, and resolve events from the steps above all
    appear on `/admin/audit`.
+9. **Admin Users (owner-only)** — sign in as the `OWNER_EMAIL` admin; confirm "Manage Admins"
+   appears in the profile pill and `/admin/users` lists every admin. Add one, edit it, remove it
+   — each should toast and show up on `/admin/audit`. Then sign in as a *non*-owner admin and
+   confirm the link is gone and `/admin/users` bounces to `/admin`.
 
 ## Typecheck & build
 

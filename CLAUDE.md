@@ -83,8 +83,14 @@ overview. Rules to preserve:
 - `requireSession(req, role)` (`lib/auth-guard.ts`) is the one place session verification happens
   — any new route touching DEO or admin data must call it, exactly like every existing route does.
   Don't let a new route trust `body.districtId`/`body.id` on its own.
-- **No `isOwner`/`OWNER_EMAIL` concept** — every admin session has equal privileges. There is no
-  multi-admin `/admin/users` or bulk DEO provisioning.
+- **One owner-tier gate, everything else is equal privilege.** Every admin can lock/unlock
+  districts, view data, and export, same as always — the only owner-only surface is
+  `/admin/users` (reachable from the profile pill dropdown, "Manage Admins") and its
+  `/api/admin/users*` routes, gated by `isOwnerEmail()` (`lib/auth-guard.ts`): the signed-in
+  admin's email must match the `OWNER_EMAIL` Wrangler secret. Ordinary admins don't see the link
+  and get `403` if they hit the API directly — the whole point is that other officers never see
+  each other's identities. Server-side also blocks removing your own account or the last
+  remaining admin. There is still no bulk DEO provisioning.
 - Rate limiting: `checkIpRateLimit()` (`lib/rate-limit.ts`, D1-backed `login_attempts` table) on
   CUG verify; a separate per-user check inside `request-magic-link`'s own route (keyed by
   `magicLinkTokens`, not IP) so a magic-link flood can't also block every admin's real login.
@@ -159,6 +165,5 @@ record manually.
 
 - This repo has no pre-commit hook enforcing the `scripts_and_data/` gitignore rules above — a
   violating file only gets caught by review.
-- Multi-admin `/admin/users`, bulk DEO provisioning, and an "Open Next Period" mechanic (opening a
-  district's next monthly period today is a manual admin action) are all out of scope for now.
-  Easy to add later if the portal's usage grows past one admin.
+- Bulk DEO provisioning and an "Open Next Period" mechanic (opening a district's next monthly
+  period today is a manual admin action) are still out of scope for now.

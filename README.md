@@ -89,8 +89,10 @@ request (`POST /api/deo/request-unlock`) instead of waiting on the Admin to noti
 Magic-link login (`/login` → email → `/verify`) → Dashboard (KPI cards, top-15-by-net-recoverable
 chart, lock-status donut) → Districts table (search/sort/paginate, per-row Unlock, Excel/SQL
 export) → District Detail (every period a district has ever had). Unlock Requests and Audit Log
-pages round out the admin surface. Every admin session has equal privileges — there is no
-multi-admin `/admin/users` or bulk DEO provisioning.
+pages round out the admin surface. Every admin can lock/unlock, view all data, and export —
+managing who has an admin account at all (`/admin/users`, "Manage Admins" in the profile pill) is
+owner-only, gated by the `OWNER_EMAIL` secret (see `CLAUDE.md`'s Auth section). There is still no
+bulk DEO provisioning.
 
 ## API (`api/app/api/*`)
 
@@ -113,6 +115,9 @@ Session auth via `requireSession(req, role)` reading the HttpOnly cookie.
 | `/api/admin/unlock-requests/resolve` | POST | Approve/deny an unlock request. |
 | `/api/admin/audit-log` | GET | Paginated audit trail (30-day retention, pruned on read). |
 | `/api/admin/truncate-demo-data` | POST | Deletes the hardcoded `Demo District` row only. |
+| `/api/admin/users` | GET, POST | Owner-only: list/add admin accounts. |
+| `/api/admin/users/update` | POST | Owner-only: edit an admin's name/email/designation. |
+| `/api/admin/users/delete` | POST | Owner-only: remove an admin (blocks self and last-remaining). |
 
 ## App Flow
 

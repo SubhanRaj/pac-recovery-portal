@@ -21,18 +21,11 @@ import { notifyToast, promptUnlockReason, confirmTruncateDemo } from "@/lib/aler
 import { exportDistrictsToXlsx, exportDistrictsToSql } from "@/lib/export";
 import { useAdminData } from "@/lib/useAdminData";
 import { setNavDistrictId, consumeNavStatusFilter } from "@/lib/adminNav";
-import AppHeader, { type NavLink } from "@/components/ui/AppHeader";
+import AppHeader, { adminNavLinks } from "@/components/ui/AppHeader";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
 import Banner from "@/components/ui/Banner";
 import HelpPanel from "@/components/ui/HelpPanel";
-
-const NAV_LINKS: NavLink[] = [
-  { label: "Dashboard", href: "/admin" },
-  { label: "Districts", href: "/admin/districts" },
-  { label: "Unlock Requests", href: "/admin/unlock-requests" },
-  { label: "Audit Log", href: "/admin/audit" },
-];
 
 const PAGE_SIZE_OPTIONS = [25, 50, 75, 100] as const;
 
@@ -47,6 +40,7 @@ function formatValue(field: (typeof DUES_FIELD_ORDER)[number], value: number) {
 export default function DistrictsPage() {
   const router = useRouter();
   const { ready, profile, districts, pacDues, sync, syncing, lastSyncedAt, unlock, truncateDemo, error, setError } = useAdminData();
+  const navLinks = adminNavLinks(profile?.isOwner);
   const [statusFilter, setStatusFilter] = useState<"all" | "locked" | "unlocked">("all");
   const [globalFilter, setGlobalFilter] = useState("");
 
@@ -270,7 +264,7 @@ export default function DistrictsPage() {
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-slate-50 dark:bg-slate-950">
-      <AppHeader title="Districts" role="admin" profile={profile} navLinks={NAV_LINKS} onSync={sync} syncing={syncing} lastSyncedAt={lastSyncedAt} districts={districts} />
+      <AppHeader title="Districts" role="admin" profile={profile} navLinks={navLinks} onSync={sync} syncing={syncing} lastSyncedAt={lastSyncedAt} districts={districts} />
       <HelpPanel pageKey="admin-districts" title="Using the districts table">
         <p>
           Click a column header to sort; use the search box to filter by district name. The

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { formatIST } from "@/lib/format";
 
 export type Profile = {
@@ -21,9 +22,13 @@ export type Profile = {
     lockedAt: string | null;
     submittedByName: string | null;
   } | null;
-  // Also DEO-only — the DEO's own pending self-service unlock request, if any (ROADMAP.md
-  // Milestone 28). Re-fetched on every load same as lockStatus, never cached.
+  // Also DEO-only — the DEO's own pending self-service unlock request, if any. Re-fetched on
+  // every load same as lockStatus, never cached.
   pendingUnlockRequest?: { requestedAt: string; reason: string } | null;
+  // Admin-only — true only for the single admin whose email matches the OWNER_EMAIL secret
+  // (see app/api/auth/me/route.ts). Gates the "Manage Admins" link below: ordinary admins never
+  // see it, since other officers don't need visibility into each other's accounts.
+  isOwner?: boolean;
 };
 
 export default function ProfileMenu({
@@ -102,6 +107,16 @@ export default function ProfileMenu({
               <i className="ti ti-clock-hour-4 text-sm" />
               Synced: {formatIST(lastSyncedAt)}
             </div>
+          )}
+          {profile.role === "admin" && profile.isOwner && (
+            <Link
+              href="/admin/users"
+              onClick={() => setOpen(false)}
+              className="flex w-full items-center gap-1.5 rounded-md border-t border-slate-100 px-0 pt-2 text-slate-700 hover:text-blue-700 dark:border-slate-800 dark:text-slate-300 dark:hover:text-blue-300"
+            >
+              <i className="ti ti-users-group text-base text-slate-400" />
+              Manage Admins
+            </Link>
           )}
           {onLogout && (
             <button

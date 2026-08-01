@@ -9,15 +9,8 @@ import { getNavDistrictId, onNavDistrictIdChange } from "@/lib/adminNav";
 import { ApiError } from "@/lib/api";
 import { notifyToast, promptUnlockReason } from "@/lib/alerts";
 import { useAdminData } from "@/lib/useAdminData";
-import AppHeader, { type NavLink } from "@/components/ui/AppHeader";
+import AppHeader, { adminNavLinks } from "@/components/ui/AppHeader";
 import Banner from "@/components/ui/Banner";
-
-const NAV_LINKS: NavLink[] = [
-  { label: "Dashboard", href: "/admin" },
-  { label: "Districts", href: "/admin/districts" },
-  { label: "Unlock Requests", href: "/admin/unlock-requests" },
-  { label: "Audit Log", href: "/admin/audit" },
-];
 
 function formatValue(field: (typeof DUES_FIELD_ORDER)[number], value: number) {
   return isMoneyField(field)
@@ -31,6 +24,7 @@ function formatValue(field: (typeof DUES_FIELD_ORDER)[number], value: number) {
 export default function DistrictDetailPage() {
   const [districtId, setDistrictId] = useState<number | null>(null);
   const { ready, profile, districts, pacDues, sync, syncing, lastSyncedAt, unlock, error, setError } = useAdminData();
+  const navLinks = adminNavLinks(profile?.isOwner);
 
   useEffect(() => {
     setDistrictId(getNavDistrictId());
@@ -61,7 +55,7 @@ export default function DistrictDetailPage() {
   if (!ready || districtId === null) {
     return (
       <div className="flex min-h-full flex-1 flex-col bg-slate-50 dark:bg-slate-950">
-        <AppHeader title="District Detail" role="admin" profile={profile} navLinks={NAV_LINKS} />
+        <AppHeader title="District Detail" role="admin" profile={profile} navLinks={navLinks} />
         <div className="mx-auto w-full max-w-7xl flex-1 px-6 py-6 lg:px-10">
           <div className="mb-6 h-8 w-48 animate-pulse rounded-md bg-slate-200 dark:bg-slate-800" />
           <div className="min-h-[500px] w-full animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
@@ -72,7 +66,7 @@ export default function DistrictDetailPage() {
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-slate-50 dark:bg-slate-950">
-      <AppHeader title="District Detail" role="admin" profile={profile} navLinks={NAV_LINKS} onSync={sync} syncing={syncing} lastSyncedAt={lastSyncedAt} districts={districts} />
+      <AppHeader title="District Detail" role="admin" profile={profile} navLinks={navLinks} onSync={sync} syncing={syncing} lastSyncedAt={lastSyncedAt} districts={districts} />
       <div className="mx-auto w-full max-w-7xl flex-1 px-6 py-6 lg:px-10">
         <Link
           href="/admin/districts"

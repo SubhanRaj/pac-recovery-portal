@@ -12,3 +12,12 @@ export async function requireSession(req: NextRequest, role: "deo" | "admin"): P
   if (!session || session.role !== role) return null;
   return session;
 }
+
+// The one owner-tier check in this app (see /admin/users) — every other admin route is equal
+// privilege via requireSession alone. Matches the reference project's OWNER_EMAIL-secret
+// pattern rather than a DB column, so ownership can be reassigned by rotating a Wrangler secret
+// without a migration.
+export function isOwnerEmail(email: string | null | undefined): boolean {
+  const ownerEmail = process.env.OWNER_EMAIL?.trim().toLowerCase();
+  return !!ownerEmail && !!email && email.trim().toLowerCase() === ownerEmail;
+}
