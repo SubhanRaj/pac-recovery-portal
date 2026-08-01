@@ -8,8 +8,12 @@
 	// project's Milestone 35 (this repo never had a Pages custom domain to migrate off of, see
 	// pac-recovery-migration-plan.md §0).
 	"workers_dev": false,
+	// custom_domain: true (not a plain path-pattern route) — matches the sibling
+	// up-excise-spatial-revenue-optimizer project's sro.exciseup.in wiring. This auto-provisions
+	// the DNS record on deploy, unlike a bare { pattern, zone_name } route, which requires a DNS
+	// record to already exist for the hostname to ever reach Cloudflare's edge at all.
 	"routes": [
-		{ "pattern": "pacrecovery.exciseup.in/*", "zone_name": "exciseup.in" }
+		{ "pattern": "pacrecovery.exciseup.in", "custom_domain": true }
 	],
 	"assets": {
 		"directory": ".open-next/assets",

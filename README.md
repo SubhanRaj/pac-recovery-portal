@@ -1,201 +1,148 @@
-# UP Excise Bakaya Tracker
+# PAC Recovery Portal
 
-A production internal portal built for the Department of Excise, Government of Uttar Pradesh to
-track and manage dues ("Bakaya") across 59 districts. District Excise Officers (DEOs) submit and
-lock one round of recovery figures each; Admins review, export, and can unlock a district for
-re-entry.
+A production internal portal for the Department of Excise, Government of Uttar Pradesh, tracking
+recovery of dues from cases originating up to FY ending 31-Mar-2019, across 75 districts. District
+Excise Officers (DEOs) submit recovery figures every month; an Admin reviews, exports, and can
+unlock a district's period for re-entry. This portal was migrated from **UP Excise Bakaya
+Tracker** (a single-snapshot, static-HTML + hand-rolled-Worker app) — see
+[pac-recovery-migration-plan.md](./pac-recovery-migration-plan.md) for the full migration
+reasoning and [v2plan.md](./v2plan.md) for the pre-migration change history.
 
-See [CLAUDE.md](./CLAUDE.md) for the rules an AI agent must follow when working in this repo, and
-[v2plan.md](./v2plan.md) for the v2 change history (PAC re-baseline, court case count, DEO login
-page, session auth).
+See [CLAUDE.md](./CLAUDE.md) for the rules an AI agent must follow when working in this repo.
 
-## Tech Stack & Libraries
+## Tech Stack
 
-A monorepo, deliberately serverless with no build step.
+One Next.js (App Router) app on [`@opennextjs/cloudflare`](https://opennext.js.org/cloudflare),
+deployed as a single Cloudflare Worker serving both UI pages and `/api/*` route handlers — no
+Cloudflare Pages anywhere. Package manager is **pnpm** throughout.
 
-### Frontend (`/frontend`) — Cloudflare Pages
-Static HTML/CSS/JS, no bundler (Webpack/Vite). Five pages, two login/app pairs:
-*   **`login.html`** → **`index.html`** — DEO-only CUG login, then the data-entry form.
-    `index.html` redirects to `login.html` if no verified session exists.
-*   **`admin-login.html`** → **`admin.html`** — Admin-only PIN login, then the dashboard.
-    `admin.html` redirects to `admin-login.html` if no verified session exists. Entirely separate
-    from the DEO pair — no shared login page, no shared session.
+*   **Next.js 16 / React 19** — App Router, `app/` directory. Lives under `api/` for historical
+    reasons (that directory used to hold just the backend Worker before this migration; the name
+    stuck rather than being renamed, matching the sibling `excise-revenue-recovery-portal`
+    project's own `api/` directory).
+*   **Cloudflare D1** (`api/db/schema.ts`, Drizzle ORM) — `districts`, `users`, `pac_dues`,
+    `magic_link_tokens`, `audit_log`, `unlock_requests`, `login_attempts`. Migrations tracked via
+    `drizzle-kit` under `api/drizzle/`.
+*   **Auth** — HttpOnly/Secure/SameSite=Lax session cookies (`jose` for JWT signing), no CORS
+    needed (UI and API are a true single origin). DEO login is CUG-hash verification (SHA-256,
+    hashed client-side before the raw mobile number ever leaves the browser); Admin login is
+    magic-link email (via [Resend](https://resend.com), `noreply@mail.exciseup.in`).
+*   **Dexie.js** — IndexedDB cache on the Admin dashboard (districts + pac_dues), explicit Sync
+    button to bypass it.
+*   **ExcelJS** — Admin's `.xlsx` export: real frozen header rows, A4-landscape/fit-to-width print
+    setup, currency formatting. Not a SheetJS-family library — see CLAUDE.md's UI conventions.
+*   **TanStack Table** — the Admin Districts page's sortable/searchable/paginated grid.
+*   **Cleave.js** — Indian Numeral (Lakh/Crore) input formatting on DEO money fields.
+*   **SweetAlert2** — blocking confirms before irreversible actions; **Tabler Icons** — all UI
+    iconography, no emojis anywhere.
 
-Libraries:
-*   **Bootstrap 5 (CDN)** — grid, cards, base styling.
-*   **SweetAlert2** — reserved for blocking confirms before an irreversible action (locking a
-    record, admin unlock, truncate-demo, logout) — see CLAUDE.md's UI conventions for the
-    inline-vs-modal split. Login errors on both login pages are inline banners, not SweetAlert2.
-*   **Cleave.js** — real-time Indian Numeral (Lakh/Crore) input formatting on money fields.
-*   **DataTables + jQuery** — the Admin Dashboard's grid (search/sort/pagination/sticky headers).
-*   **Dexie.js** — IndexedDB cache on the Admin Dashboard so all districts load instantly on
-    revisit, with an explicit Sync button to bypass the cache.
-*   **ExcelJS** — generates the Admin's `.xlsx` export: real cell colors, currency formatting,
-    genuine frozen header rows, and A4-landscape/fit-to-width print setup with a repeated header
-    row on multi-page printouts. Not xlsx-js-style/SheetJS — confirmed (same finding as the
-    sibling `excise-revenue-recovery-portal`) that library's community core silently drops
-    frozen-pane and print-layout XML, so `!views`/page-setup calls against it do nothing in real
-    Excel despite not erroring.
-*   **Tabler Icons** (webfont) — all UI iconography. No emojis anywhere in the UI.
+## Data model
 
-### Backend (`/api`) — Cloudflare Workers + D1
-*   **Cloudflare Workers** (`worker.js`) — single-file router for all API traffic.
-*   **Cloudflare D1** (`schema.sql`) — serverless SQLite.
-*   **Web Crypto API** (`crypto.subtle`) — SHA-256 hashing of CUG mobile numbers (client-side,
-    before the raw number ever leaves the browser) and HMAC-SHA256 signing of DEO session tokens
-    (server-side) — no external crypto/JWT dependency.
-*   **Wrangler** — local D1 execution, secret management, deploys.
+See `api/db/schema.ts` for the full column reference and inline reasoning. Key points:
 
-### Data Processing Utilities (`scripts_and_data/`)
-*   **Python 3** (`gen_deo_data.py`, kept locally, gitignored) — maps the department's Hindi
-    contact directory to English district names, hashes CUG numbers, and emits the seed SQL that
-    populates `cug_hash`/`deo_email` for the 59 tracked districts. Never commit this script's
-    inputs or outputs — see Security below.
+*   **`districts`** — all 75 UP districts (matching `excise-revenue-recovery-portal`'s list).
+    `totalDues`/`collectedTillDate` are the one-time, department-sourced, read-only baseline for
+    cases originating up to FY ending 31-Mar-2019 — never DEO-editable, never re-entered per
+    period. `NULL` for the districts this portal hasn't yet received department figures for.
+*   **`pac_dues`** — the recurring **monthly** snapshot, one row per `(districtId, period)`
+    (`period` is `"YYYY-MM"`). `openingBalance` is the prior period's `netRecoverable` (or
+    `totalDues − collectedTillDate` for a district's first period ever) — computed server-side
+    only, never trusted from the client. Lock/unlock, `lockedAt`, `submittedByName`, and unlock
+    metadata (`unlockedAt`/`unlockReason`/`unlockedBy`) all live here, **per period** — unlike the
+    original single-snapshot version (or the reference project's district-lifetime lock), a
+    district's lock state is scoped to one month, not forever.
+*   **`users`** — `role: "deo" | "admin"`. DEOs are keyed by `cugHash` (SHA-256 of their 10-digit
+    CUG mobile number); admins by `email` (magic-link recipient).
+*   No "Open Next Period" mechanic is built yet — see `pac-recovery-migration-plan.md` §3. Today
+    every district has exactly the one period the legacy-data migration seeded.
 
-## Database Schema
-
-`excise_dues` — one row per district (plus one `Demo District` row used only for pre-launch
-testing, truncated via the Admin dashboard before real DEOs get the URL).
-
-| Column | Type | Notes |
-|---|---|---|
-| `id` | INTEGER PK | |
-| `district_name` | TEXT | Current official name — e.g. `Prayagraj` (not `Allahabad`), `Lakhimpur Kheri` (not `Kheri`). |
-| `total_dues` | REAL | **"2. वसूल की जाने वाली सकल धनराशि"** — read-only, sourced from the department's Excel report. |
-| `collected_till_date` | REAL | **"3. 08-Jul-26 तक वसूल की गई धनराशि"** — read-only, the PAC-meeting baseline. |
-| `collected_after_date` | REAL | **"4. 08-Jul-26 के उपरांत वसूल की गई धनराशि"** — DEO input. |
-| `batte_khatte_count` / `batte_khatte_amount` | INTEGER / REAL | **"6. ... बट्टे खाते ..."** — DEO input, count + amount. |
-| `court_case_count` / `court_stayed_amount` | INTEGER / REAL | **"7. ... न्यायालय द्वारा स्थगित ..."** — DEO input, count + amount, mirrors Batte Khatte. |
-| `is_locked` | INTEGER DEFAULT 0 | Flips to 1 when the DEO locks the record. |
-| `deo_name` | TEXT | Captured via SweetAlert2 at lock time — the digital signature. |
-| `deo_email` | TEXT | Reference-only provisioning data (department contact directory), not entered by the DEO. |
-| `cug_hash` | TEXT, UNIQUE | SHA-256 of the DEO's 10-digit CUG mobile number. |
-| `locked_at` | DATETIME | |
-| `last_updated` | DATETIME | |
-
-"5. कुल बकाया धनराशि" and "8. शुद्ध वसूल की जाने वाली धनराशि" are **not** columns — computed
-client-side, see Calculation Logic below.
-
-**Data-entry scope**: the portal only tracks dues from cases that originated up to FY ending
-31-Mar-2019 — a static bilingual banner near the district selector, not a live date check (dues
-can predate the 1970s).
+**Data-entry scope**: this portal only tracks dues from cases that originated up to FY ending
+31-Mar-2019 — a static bilingual banner on the DEO data-entry page, not a live date check (dues
+can predate the 1970s). Recovery *entries* happen in real time, monthly; the underlying dues stock
+itself never grows.
 
 ## Calculation Logic
 
-Computed reactively client-side in both `index.html` and `admin.html`, same formulas:
+Computed server-side only (`lib/dues-fields.ts`'s `computeNetRecoverable()`), mirrored client-side
+for a live preview:
 
-1.  **कुल बकाया धनराशि (Total Dues Left)** = `total_dues − collected_till_date − collected_after_date`
-2.  **शुद्ध वसूल की जाने वाली धनराशि (Net Recoverable)** = `max(0, Total Dues Left − batte_khatte_amount − court_stayed_amount)`
-3.  **Submit is disabled** if `batte_khatte_amount > Total Dues Left`, or
-    `court_stayed_amount > (Total Dues Left − batte_khatte_amount)`.
+1.  **कुल बकाया धनराशि (Total Dues Left)** = `openingBalance − recoveredThisPeriod`
+2.  **शुद्ध वसूल की जाने वाली धनराशि (Net Recoverable)** = `max(0, Total Dues Left − batteKhatteAmount − courtStayedAmount)`
+3.  **Submit is rejected (400)** server-side if `batteKhatteAmount > Total Dues Left`, or
+    `courtStayedAmount > (Total Dues Left − batteKhatteAmount)`.
 
-## DEO Flow (`login.html` → `index.html`)
+## DEO Flow (`/login` → `/deo-data-entry`)
 
-1.  **Login (`login.html`)** — DEO enters their 10-digit CUG mobile number. Client-side checks:
-    must start with `94544` (the department's real prefix) *or* hash to the seeded demo account's
-    `DEMO_CUG_HASH` — exempted by hash, not by number, so the raw demo number never appears in
-    source (ask an admin for it if you need to test). The number is SHA-256-hashed in-browser
-    (Web Crypto) — the raw number never leaves the device — and the hash is POSTed to
-    `/verify-deo`. Errors render inline under the field, not as a popup.
-2.  **Session** — on success, the Worker signs a district-bound token and sets it as an
-    `HttpOnly; Secure; SameSite=None` cookie (`deo_session`), and returns `district_id` in the
-    JSON body. The frontend stores that id in `localStorage` (`cug_verified_district_id`) purely
-    to auto-select the dropdown and skip re-login on revisit — the cookie, not localStorage, is
-    what the server actually trusts.
-3.  **`index.html`** redirects to `login.html` if no `cug_verified_district_id` is in
-    `localStorage`. Otherwise the district dropdown is pre-selected and disabled, so a DEO
-    physically cannot pick another district.
-4.  **Data entry** — all DEO-input fields (`collected_after_date`, both count/amount pairs) start
-    **blank**, not `0`. An explicit `0` is a valid answer; leaving a field blank and submitting is
-    not — it's blocked with an inline SweetAlert2 toast ("Field left blank / फ़ील्ड खाली है"),
-    never silently coerced to zero.
-5.  **Locking** is a two-step confirm: a plain "are you sure, have you checked the data" dialog,
-    then a name-entry prompt with a liability disclaimer (English + Hindi — locking makes the
-    submitting DEO personally responsible for the figures) validated by `validateDeoName()`
-    (rejects blank input, digits — guards against a pasted CUG number — and designation words like
-    "DEO" typed in place of an actual name).
-6.  **Submit** — `POST /` sends the session cookie automatically (`credentials: 'include'`); the
-    Worker verifies it and rejects (403) if the token's district doesn't match the row being
-    written, even if the caller has a valid `X-API-Secret`. A 403 here means the session expired
-    (24h TTL) — the DEO is bounced back to `login.html` to re-verify.
-7.  **Post-lock** the form is replaced by a locked-notice banner; only an Admin unlock re-enables
-    it.
-8.  **Logout** clears the cookie server-side (`POST /deo-logout`) and the localStorage flag, then
-    redirects to `login.html`.
+Single-page form (no multi-step wizard — this domain has one period at a time, not a multi-year
+loop). CUG login → session cookie → form pre-filled from the district's current period (read-only
+Total Dues/Opening Balance, editable Recovered This Period/Batte Khatte/Court Stayed) → two-step
+lock confirm (plain "are you sure" dialog, then a name-entry prompt with a liability disclaimer,
+validated against blank/digits/designation-words) → `POST /api/pac-dues/submit` locks the period.
+A locked DEO can file a self-service unlock request (`POST /api/deo/request-unlock`) instead of
+waiting on the Admin to notice.
 
-## Admin Flow (`admin-login.html` → `admin.html`)
+## Admin Flow (`/admin` → `/admin/districts` → `/admin/districts/detail`)
 
-*   **PIN auth (`admin-login.html`)** — a full page, separate from DEO CUG login; PIN checked
-    against the `ADMIN_PIN` Wrangler secret via `POST /auth`, throttled to 10 attempts per 15
-    minutes per IP. Errors render inline, not as a popup, same convention as `login.html`. On
-    success, the Worker signs a role-bound session token and sets it as an
-    `HttpOnly; Secure; SameSite=None` cookie (`admin_session`) — `sessionStorage`'s `admin_auth`
-    flag is only a client-side "skip the login page this tab" convenience; the cookie is what the
-    server actually checks. `admin.html` redirects to `admin-login.html` if that flag is absent.
-*   **Unlock** — resets `is_locked` to 0 for a district (`POST /unlock`), with a Hindi confirm
-    dialog, so a DEO can re-submit. Requires the `admin_session` cookie (403 without it).
-*   **Truncate Demo** — `POST /truncate-demo` deletes only the row where
-    `district_name = 'Demo District'`, hardcoded server-side — used once, right before real DEOs
-    get the portal URL, to remove the account used for end-to-end testing. Also requires the
-    `admin_session` cookie.
-*   **Logout** clears the cookie server-side (`POST /admin-logout`) before clearing
-    `sessionStorage` and redirecting back to `admin-login.html`.
-*   **Offline cache** (Dexie) for instant reloads, with a manual Sync button and an
-    auto-sync-then-export on both export actions.
-*   **Excel export** (ExcelJS) — genuine frozen header row (verified: real `<pane>` XML, not a
-    silently-dropped `!views` call), A4-landscape print setup with fit-to-width and a repeated
-    header row on multi-page printouts, a summed totals row, Indian Rupee formatting, generation
-    timestamp in the header banner.
-*   **SQL export** — a timestamped `.sql` file of `UPDATE` statements for the whole dataset.
+Magic-link login (`/login` → email → `/verify`) → Dashboard (KPI cards, top-15-by-net-recoverable
+chart, lock-status donut) → Districts table (search/sort/paginate, per-row Unlock, Excel/SQL
+export) → District Detail (every period a district has ever had, not a fixed year-column matrix).
+Unlock Requests and Audit Log pages round out the admin surface. No multi-admin `/admin/users` or
+bulk DEO provisioning in this version — dropped from the reference project's feature set as out of
+scope for now (see `pac-recovery-migration-plan.md` §6.2).
 
-## API (`worker.js`)
+## API (`api/app/api/*`)
 
-Every route requires `X-API-Secret` matching the `API_SECRET` Wrangler secret — a coarse bot
-filter, not a real per-user credential (see CLAUDE.md's Auth section for why, and what actually
-gates writes). In-memory sliding-window rate limiting (60 req/min per `cf-connecting-ip`, HTTP
-429 past that; the tracking `Map` self-clears past 5000 entries to bound memory).
-
-CORS is locked to the `FRONTEND_URL` Wrangler var (exact match, not a wildcard) with
-`Access-Control-Allow-Credentials: true` — required for the cross-site `deo_session`/
-`admin_session` cookies (Pages and Workers are separate origins).
+Every route wrapped in `withErrorHandling()` (consistent JSON error shape + security headers).
+Session auth via `requireSession(req, role)` reading the HttpOnly cookie — no `X-API-Secret`-style
+shared-secret header anywhere, since UI and API share an origin.
 
 | Route | Method | Purpose |
 |---|---|---|
-| `/` | GET | All district records (used for the DEO dropdown and the Admin table). |
-| `/` | POST | DEO submits + locks a district. Requires a `deo_session` cookie whose district matches `body.id` — see Auth. |
-| `/auth` | POST | Admin PIN check; throttled 10/15min per IP. Sets `admin_session` on success. |
-| `/unlock` | POST | Admin resets a district's lock. Requires `admin_session`. |
-| `/truncate-demo` | POST | Admin deletes the `Demo District` row only. Requires `admin_session`. |
-| `/verify-deo` | POST | CUG hash lookup; on success, sets the `deo_session` cookie. |
-| `/deo-logout` | POST | Clears the `deo_session` cookie. |
-| `/admin-logout` | POST | Clears the `admin_session` cookie. |
+| `/api/auth/verify-cug` | POST | DEO CUG-hash login. Rate-limited per IP. |
+| `/api/auth/request-magic-link` | POST | Admin login step 1 — emails a 15-min single-use link. Rate-limited per user. |
+| `/api/auth/verify-magic-link` | POST | Admin login step 2 — exchanges the token for a session cookie. |
+| `/api/auth/me` | GET | Session + current-period info for the logged-in user. |
+| `/api/auth/logout` | POST | Clears the session cookie for the given role. |
+| `/api/pac-dues/mine` | GET | DEO's district baseline + current period row. |
+| `/api/pac-dues/submit` | POST | DEO submits + locks the current period. |
+| `/api/deo/request-unlock` | POST | DEO's self-service unlock request (FormData). |
+| `/api/admin/districts` | GET | Full districts + pac_dues dump, for the Dexie cache. |
+| `/api/admin/unlock` | POST | Admin unlocks a `(district, period)`. |
+| `/api/admin/unlock-requests` | GET | List of unlock requests. |
+| `/api/admin/unlock-requests/resolve` | POST | Approve/deny an unlock request. |
+| `/api/admin/audit-log` | GET | Paginated audit trail (30-day retention, pruned on read). |
+| `/api/admin/truncate-demo-data` | POST | Deletes the hardcoded `Demo District` row only. |
+
+## Getting started
+
+```bash
+cd api
+pnpm install
+cp .dev.vars.example .dev.vars   # fill in JWT_SECRET, RESEND_API_KEY, FRONTEND_URL, FROM_EMAIL
+pnpm run db:migrate:local        # apply drizzle/*.sql to the local D1 (miniflare) instance
+pnpm run dev                     # http://localhost:3000 — UI only, no D1 binding
+pnpm run preview                 # closer to production: builds via OpenNext, real Worker + D1
+                                  # binding + asset serving on http://localhost:8787
+```
+
+## Deploying
+
+Live at `https://pacrecovery.exciseup.in` (Cloudflare Workers Custom Domain — auto-provisions its
+own DNS on deploy, see `api/wrangler.jsonc`'s `custom_domain: true` route) as a single Cloudflare
+Worker + D1. **Never run `wrangler deploy`, a `--remote` D1 command, or push to `main` (which
+triggers `deploy.yml`) without the user explicitly saying so for that specific change** — this
+project has live production data and real government users.
+
+*   `.github/workflows/ci.yml` — `tsc --noEmit` + `next build` on every push/PR touching `api/`.
+*   `.github/workflows/deploy.yml` — `pnpm run deploy` on push to `main`, requires
+    `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` in GitHub Secrets.
+*   Remote secrets (Wrangler secrets, not `wrangler.jsonc` vars): `JWT_SECRET`, `RESEND_API_KEY`,
+    `FRONTEND_URL`, `FROM_EMAIL`.
 
 ## Scripts and Data (`scripts_and_data/`)
 
-`.gitignore` excludes `*.sql`, `*.csv`, `*.txt`, `*.py`, and anything matching `*hash*` under this
-directory — the department's contact directory (real officer names, phone numbers, CUG numbers)
-lives here locally only, never in git. See CLAUDE.md's Security section for what happened when
-this wasn't enforced and how it was fixed.
-
-## Setup and Deployment
-
-1.  **Local D1**:
-    ```bash
-    cd api
-    npx wrangler d1 execute excise-bakaya-db --local --file=./schema.sql
-    npx wrangler d1 execute excise-bakaya-db --local --file=./import.sql
-    ```
-2.  **Local secrets** (`api/.dev.vars`, gitignored):
-    ```
-    API_SECRET="..."
-    ADMIN_PIN="..."
-    JWT_SECRET="..."
-    ```
-3.  **Local worker**: `cd api && npx wrangler dev`
-4.  **Local frontend**: serve `/frontend` with any static server (e.g. `npx serve frontend`).
-5.  **Remote secrets** (one-time, or on rotation): `npx wrangler secret put JWT_SECRET` (and
-    `API_SECRET`/`ADMIN_PIN`) from `/api`. `FRONTEND_URL` is a plain (non-secret) var in
-    `wrangler.toml`.
-6.  **CI/CD & Deployment**: Pushing to the `main` branch automatically triggers GitHub Actions to test (`ci.yml`) and deploy (`deploy.yml`) both the frontend to Cloudflare Pages and the API Worker to Cloudflare Workers.
-    *   Requires `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to be configured under your repository's GitHub Secrets.
-    *   Manual deployments can be run via the GitHub Actions tab.
+`.gitignore` excludes `*.sql`, `*.csv`, `*.txt`, `*.py`, anything matching `*hash*`, and the
+`backups/` directory under here — the department's contact directory (real officer names, phone
+numbers, CUG numbers) and any D1 export/backup taken during this migration live here locally only,
+never in git. See CLAUDE.md's Security section for what happened when this wasn't enforced and how
+it was fixed.

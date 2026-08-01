@@ -158,3 +158,13 @@ errors before deploy.
   - **District Select Removal**: Replaced the legacy interactive `<select>` dropdown for districts with a static text heading (`District: <Name>`). Since the DEO is securely authenticated via their CUG number, the district is inherently locked to their session, rendering the dropdown UI redundant. The subsequent form fields were re-numbered from 1 to 7.
   - **Count/Amount Synchrony Logic**: Added dynamic inline validation to enforce that if a count is entered (>0), the corresponding amount must also be >0, and vice-versa. Displays a bilingual error directly below the relevant fields and safely disables the submission button if this rule is violated.
 
+## 12. Superseded — migrated to PAC Recovery Portal (2026-08-01)
+
+Everything above this line describes the static-HTML + `worker.js` + single-snapshot-per-district
+system this repo used to be — kept as historical record, not current architecture. That system was
+retired in favor of **PAC Recovery Portal**: one Next.js app on `@opennextjs/cloudflare`,
+Drizzle/D1, monthly recovery periods instead of one lifetime submission. Full migration reasoning
+in [pac-recovery-migration-plan.md](./pac-recovery-migration-plan.md); current architecture in
+[README.md](./README.md) and [CLAUDE.md](./CLAUDE.md). This file is not being extended further —
+new change history belongs in commit messages / a future equivalent doc for the new app, not here.
+
