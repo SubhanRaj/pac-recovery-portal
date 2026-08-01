@@ -5,7 +5,3 @@ FRONTEND_URL=http://localhost:3000
 # up-excise-spatial-revenue-optimizer project's RESEND_FROM_EMAIL, same Resend account).
 # Optional — falls back to Resend's shared sandbox sender (onboarding@resend.dev) if unset.
 FROM_EMAIL=noreply@mail.exciseup.in
-# The one admin account allowed to run DEO Provisioning (/admin/districts/provisioning) — every
-# other admin sees the link hidden and gets a 403 if they hit the API route directly. Set to
-# the actual owner's login email; never commit the real value.
-OWNER_EMAIL=owner@example.com
