@@ -13,7 +13,8 @@ import {
   type PaginationState,
   type SortingState,
 } from "@tanstack/react-table";
-import { FINANCIAL_YEARS, PAC_FIELD_ORDER, PAC_FIELD_LABELS, OPENING_BALANCE_LABEL, isMoneyField, englishLabel } from "@/lib/pac-fields";
+import { DUES_FIELD_LABELS, OPENING_BALANCE_LABEL, isMoneyField, englishLabel } from "@/lib/dues-fields";
+import { DUES_FIELD_ORDER, type Row } from "@/lib/dues-row";
 import { formatIST } from "@/lib/format";
 import { ApiError } from "@/lib/api";
 import { notifyToast, promptUnlockReason, confirmTruncateDemo } from "@/lib/alerts";
@@ -25,7 +26,6 @@ import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
 import Banner from "@/components/ui/Banner";
 import HelpPanel from "@/components/ui/HelpPanel";
-import type { CachedDistrict } from "@/lib/client-db";
 
 const NAV_LINKS: NavLink[] = [
   { label: "Dashboard", href: "/admin" },
@@ -36,12 +36,9 @@ const NAV_LINKS: NavLink[] = [
 
 const PAGE_SIZE_OPTIONS = [25, 50, 75, 100] as const;
 
-type Row = CachedDistrict &
-  Record<(typeof PAC_FIELD_ORDER)[number], number> & { openingBalance: number; netRecoverable: number };
-
 const columnHelper = createColumnHelper<Row>();
 
-function formatValue(field: (typeof PAC_FIELD_ORDER)[number], value: number) {
+function formatValue(field: (typeof DUES_FIELD_ORDER)[number], value: number) {
   return isMoneyField(field)
     ? `₹${value.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
     : value.toLocaleString("en-IN");
@@ -49,8 +46,7 @@ function formatValue(field: (typeof PAC_FIELD_ORDER)[number], value: number) {
 
 export default function DistrictsPage() {
   const router = useRouter();
-  const { ready, profile, districts, pacData, sync, syncing, lastSyncedAt, unlock, truncateDemo, error, setError } = useAdminData();
-  const [selectedYear, setSelectedYear] = useState<(typeof FINANCIAL_YEARS)[number]>(FINANCIAL_YEARS[0]);
+  const { ready, profile, districts, pacDues, sync, syncing, lastSyncedAt, unlock, truncateDemo, error, setError } = useAdminData();
   const [statusFilter, setStatusFilter] = useState<"all" | "locked" | "unlocked">("all");
   const [globalFilter, setGlobalFilter] = useState("");
 
@@ -62,22 +58,21 @@ export default function DistrictsPage() {
   }, []);
   const [sorting, setSorting] = useState<SortingState>([]);
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 25 });
-  const [isChangingFY, setIsChangingFY] = useState(false);
   useEffect(() => {
-    const saved = localStorage.getItem("excise-portal:districts-pageSize");
+    const saved = localStorage.getItem("pac-recovery-portal:districts-pageSize");
     if (saved) {
       setPagination((p) => ({ ...p, pageSize: Number(saved) }));
     }
   }, []);
   const [exporting, setExporting] = useState<"xlsx" | "sql" | null>(null);
 
-  const hasDemoDistrict = districts.some(d => d.districtName === "Demo District");
+  const hasDemoDistrict = districts.some((d) => d.districtName === "Demo District");
 
-  async function handleUnlock(districtId: number, districtName: string) {
+  async function handleUnlock(districtId: number, districtName: string, period: string) {
     const reason = await promptUnlockReason(districtName);
     if (!reason) return;
     try {
-      await unlock(districtId, reason);
+      await unlock(districtId, period, reason);
       notifyToast({ icon: "success", title: "District unlocked." });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Unlock failed.");
@@ -94,9 +89,6 @@ export default function DistrictsPage() {
     });
     try {
       const fresh = await sync();
-      // formatIST(), not toLocaleString("en-IN") alone — the latter only sets locale
-      // conventions, not the timezone, so it silently renders in the admin's browser's own
-      // local zone instead of real IST (see CLAUDE.md's formatIST() note).
       const now = formatIST(new Date().toISOString());
       const result = await window.Swal.fire({
         title: "Export Ready",
@@ -110,7 +102,7 @@ export default function DistrictsPage() {
         allowOutsideClick: false,
       });
       if (result.isConfirmed) {
-        await exportDistrictsToXlsx(fresh?.districts ?? districts, fresh?.pacData ?? pacData);
+        await exportDistrictsToXlsx(fresh?.districts ?? districts, fresh?.pacDues ?? pacDues);
       }
     } finally {
       setExporting(null);
@@ -127,9 +119,6 @@ export default function DistrictsPage() {
     });
     try {
       const fresh = await sync();
-      // formatIST(), not toLocaleString("en-IN") alone — the latter only sets locale
-      // conventions, not the timezone, so it silently renders in the admin's browser's own
-      // local zone instead of real IST (see CLAUDE.md's formatIST() note).
       const now = formatIST(new Date().toISOString());
       const result = await window.Swal.fire({
         title: "Export Ready",
@@ -143,35 +132,48 @@ export default function DistrictsPage() {
         allowOutsideClick: false,
       });
       if (result.isConfirmed) {
-        exportDistrictsToSql(fresh?.districts ?? districts, fresh?.pacData ?? pacData);
+        exportDistrictsToSql(fresh?.districts ?? districts, fresh?.pacDues ?? pacDues);
       }
     } finally {
       setExporting(null);
     }
   }
 
-  const rows: Row[] = useMemo(
-    () =>
-      districts
-        .filter((d) =>
-          statusFilter === "all" ? true : statusFilter === "locked" ? d.lockStatus === 1 : d.lockStatus === 0
-        )
-        .map((d) => {
-          const match = pacData.find((p) => p.districtId === d.id && p.financialYear === selectedYear);
-          const values = Object.fromEntries(
-            PAC_FIELD_ORDER.map((field) => [field, match?.[field] ?? 0])
-          ) as Record<(typeof PAC_FIELD_ORDER)[number], number>;
-          return { ...d, ...values, openingBalance: match?.openingBalance ?? 0, netRecoverable: match?.netRecoverable ?? 0 };
-        }),
-    [districts, pacData, selectedYear, statusFilter]
-  );
+  // One row per district, its latest pac_dues period — no FY selector here, unlike the
+  // reference project, since this domain has one open period per district, not a 5-year loop.
+  const rows: Row[] = useMemo(() => {
+    const latestByDistrict = new Map<number, (typeof pacDues)[number]>();
+    for (const p of pacDues) {
+      const existing = latestByDistrict.get(p.districtId);
+      if (!existing || p.period > existing.period) latestByDistrict.set(p.districtId, p);
+    }
+    return districts
+      .filter((d) => {
+        if (statusFilter === "all") return true;
+        const lockStatus = latestByDistrict.get(d.id)?.lockStatus ?? 0;
+        return statusFilter === "locked" ? lockStatus === 1 : lockStatus === 0;
+      })
+      .map((d) => {
+        const p = latestByDistrict.get(d.id);
+        const values = Object.fromEntries(DUES_FIELD_ORDER.map((field) => [field, p ? p[field] : 0])) as Record<
+          (typeof DUES_FIELD_ORDER)[number],
+          number
+        >;
+        return {
+          ...d,
+          ...values,
+          openingBalance: p?.openingBalance ?? 0,
+          netRecoverable: p?.netRecoverable ?? 0,
+          lockStatus: p?.lockStatus ?? 0,
+          period: p?.period ?? null,
+        };
+      });
+  }, [districts, pacDues, statusFilter]);
 
   const totals = useMemo(() => {
     const sums = Object.fromEntries(
-      PAC_FIELD_ORDER.map((field) => [field, rows.reduce((sum, r) => sum + r[field], 0)])
-    ) as Record<(typeof PAC_FIELD_ORDER)[number], number>;
-    // Summing across districts for one FY (not across years, which would double-count the
-    // carried-forward balance) is a legitimate total — see CLAUDE.md's Data model section.
+      DUES_FIELD_ORDER.map((field) => [field, rows.reduce((sum, r) => sum + r[field], 0)])
+    ) as Record<(typeof DUES_FIELD_ORDER)[number], number>;
     const openingBalanceTotal = rows.reduce((sum, r) => sum + r.openingBalance, 0);
     const netRecoverableTotal = rows.reduce((sum, r) => sum + r.netRecoverable, 0);
     return { sums, openingBalanceTotal, netRecoverableTotal };
@@ -182,6 +184,11 @@ export default function DistrictsPage() {
       columnHelper.accessor("districtName", {
         header: "District",
         cell: (info) => info.getValue(),
+      }),
+      columnHelper.display({
+        id: "period",
+        header: "Period",
+        cell: ({ row }) => row.original.period ?? "—",
       }),
       columnHelper.display({
         id: "openingBalance",
@@ -203,11 +210,9 @@ export default function DistrictsPage() {
           </span>
         ),
       }),
-      ...PAC_FIELD_ORDER.map((field) =>
+      ...DUES_FIELD_ORDER.map((field) =>
         columnHelper.accessor(field, {
-          // English only — matches the Excel export's audience convention (see CLAUDE.md),
-          // no Hindi tooltip needed since the header text itself is already the short form.
-          header: () => englishLabel(PAC_FIELD_LABELS[field]),
+          header: () => englishLabel(DUES_FIELD_LABELS[field]),
           cell: (info) => formatValue(field, info.getValue()),
         })
       ),
@@ -220,11 +225,11 @@ export default function DistrictsPage() {
         id: "actions",
         header: "Action",
         cell: ({ row }) =>
-          row.original.lockStatus === 1 ? (
+          row.original.lockStatus === 1 && row.original.period ? (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                handleUnlock(row.original.id, row.original.districtName);
+                handleUnlock(row.original.id, row.original.districtName, row.original.period!);
               }}
               className="rounded-full border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
             >
@@ -270,19 +275,15 @@ export default function DistrictsPage() {
         <p>
           Click a column header to sort; use the search box to filter by district name. The
           District column stays pinned while you scroll horizontally. Click anywhere on a row
-          to open that district&apos;s full revenue detail across all 5 years.
+          to open that district&apos;s full detail.
         </p>
+        <p>The bottom row totals every numeric column across all 75 districts.</p>
         <p>
-          The bottom row totals every numeric column for the selected year across all 75
-          districts.
-        </p>
-        <p>
-          <strong>Export as Excel Workbook</strong> re-syncs first, then builds a 5-sheet
-          spreadsheet from the freshly-synced data. <strong>Export as SQL</strong> does the same
-          re-sync but downloads a plain <code>.sql</code> restore script instead — useful for
-          taking a manual backup. Both buttons show &quot;Exporting…&quot; while this runs so it
-          doesn&apos;t look like the page has frozen. <strong>Unlock</strong> lets a District
-          Excise Officer re-edit a submission they already locked.
+          <strong>Export as Excel Workbook</strong> re-syncs first, then builds a spreadsheet
+          from the freshly-synced data. <strong>Export as SQL</strong> does the same re-sync
+          but downloads a plain <code>.sql</code> restore script instead — useful for taking a
+          manual backup. <strong>Unlock</strong> lets a District Excise Officer re-edit a
+          submission they already locked.
         </p>
       </HelpPanel>
       <div className="flex w-full flex-1 flex-col px-4 py-6 sm:px-6 lg:px-[10%] xl:px-[5%] 2xl:px-[3%]">
@@ -310,25 +311,6 @@ export default function DistrictsPage() {
               <option value="all">All statuses</option>
               <option value="locked">Locked</option>
               <option value="unlocked">Unlocked</option>
-            </Select>
-            <Select
-              value={selectedYear}
-              size="md"
-              disabled={isChangingFY}
-              onChange={(e) => {
-                const val = e.target.value as (typeof FINANCIAL_YEARS)[number];
-                setIsChangingFY(true);
-                setTimeout(() => {
-                  setSelectedYear(val);
-                  setIsChangingFY(false);
-                }, 400);
-              }}
-            >
-              {FINANCIAL_YEARS.map((y) => (
-                <option key={y} value={y}>
-                  FY {y}
-                </option>
-              ))}
             </Select>
             <Button size="xs" onClick={exportExcel} disabled={exporting !== null}>
               <i className={`ti ti-file-spreadsheet text-sm ${exporting === "xlsx" ? "animate-pulse" : ""}`} />
@@ -360,26 +342,8 @@ export default function DistrictsPage() {
           </div>
         </div>
 
-        {/* max-h-[70vh] is a real cap (not just min-h/flex-1) so this scrolls internally at
-            every breakpoint — every ancestor up to <body> only sets min-height (see
-            layout.tsx), so flex-1 alone never clips and the table would otherwise just grow
-            the whole page. This cap is what lets the sticky <thead> below actually freeze:
-            position: sticky needs a real scrolling ancestor to stick within, and an
-            lg:max-h-none override here previously removed that ancestor on desktop, leaving
-            the header's sticky context fall back to the page/viewport where it competed with
-            AppHeader's own sticky top-0 instead of freezing inside this table. Always capping
-            it keeps the header frozen consistently at every screen size. */}
         <div className="max-h-[70vh] min-h-[50vh] flex-1 overflow-auto rounded-lg border border-slate-200 bg-white shadow-sm [scrollbar-width:thin] scroll-smooth dark:border-slate-800 dark:bg-slate-900">
-          {isChangingFY ? (
-            <div className="p-6">
-              <div className="mb-6 h-8 w-full animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
-              <div className="mb-4 h-12 w-full animate-pulse rounded bg-slate-100 dark:bg-slate-800/50" />
-              <div className="mb-4 h-12 w-full animate-pulse rounded bg-slate-100 dark:bg-slate-800/50" />
-              <div className="mb-4 h-12 w-full animate-pulse rounded bg-slate-100 dark:bg-slate-800/50" />
-              <div className="h-12 w-full animate-pulse rounded bg-slate-100 dark:bg-slate-800/50" />
-            </div>
-          ) : (
-            <table className="w-full border-collapse text-sm">
+          <table className="w-full border-collapse text-sm">
             <thead>
               {table.getHeaderGroups().map((hg) => (
                 <tr key={hg.id} className="bg-slate-50 dark:bg-slate-800">
@@ -401,7 +365,7 @@ export default function DistrictsPage() {
                 </tr>
               ))}
             </thead>
-            <tbody key={selectedYear + statusFilter} className="animate-in fade-in duration-500">
+            <tbody>
               {table.getRowModel().rows.map((row) => (
                 <tr
                   key={row.id}
@@ -427,11 +391,12 @@ export default function DistrictsPage() {
             <tfoot>
               <tr className="sticky bottom-0 z-20 border-t-2 border-slate-300 bg-slate-100 font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
                 <td className="sticky left-0 z-30 whitespace-nowrap bg-slate-100 px-3 py-2.5 dark:bg-slate-800">Total</td>
+                <td className="whitespace-nowrap px-3 py-2.5" />
                 <td className="whitespace-nowrap px-3 py-2.5">
                   ₹{totals.openingBalanceTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5" />
-                {PAC_FIELD_ORDER.map((field) => (
+                {DUES_FIELD_ORDER.map((field) => (
                   <td key={field} className="whitespace-nowrap px-3 py-2.5">
                     {formatValue(field, totals.sums[field])}
                   </td>
@@ -443,7 +408,6 @@ export default function DistrictsPage() {
               </tr>
             </tfoot>
           </table>
-          )}
         </div>
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600 dark:text-slate-400">
@@ -454,7 +418,7 @@ export default function DistrictsPage() {
               onChange={(e) => {
                 const size = Number(e.target.value);
                 setPagination((p) => ({ ...p, pageIndex: 0, pageSize: size }));
-                localStorage.setItem("excise-portal:districts-pageSize", String(size));
+                localStorage.setItem("pac-recovery-portal:districts-pageSize", String(size));
               }}
             >
               {PAGE_SIZE_OPTIONS.map((n) => (

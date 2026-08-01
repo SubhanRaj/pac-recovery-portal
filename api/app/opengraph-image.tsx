@@ -1,17 +1,14 @@
 import { ImageResponse } from "next/og";
 
-// Required for `output: "export"` (next.config.ts) — otherwise Next treats this route as
-// potentially dynamic and refuses to prerender it into the static build.
+// Statically generated at build time (no dynamic params on this route).
 export const dynamic = "force-static";
 
-export const alt = "Excise Revenue Recovery Portal — Department of Excise, Government of Uttar Pradesh";
+export const alt = "PAC Recovery Portal — Department of Excise, Government of Uttar Pradesh";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-// Statically generated at build time (no dynamic params on this route) — works fine under
-// `output: "export"`, same as any other prerendered static asset. English-only text, matching
-// this app's "UI chrome is English only" convention (CLAUDE.md) — the six PAC field labels are
-// the only place Hindi is used, not chrome like a social-preview card.
+// English-only text — UI chrome outside the DEO-facing form stays English, same convention
+// this repo's original single-snapshot version used (CLAUDE.md's UI conventions).
 export default function Image() {
   return new ImageResponse(
     (
@@ -54,7 +51,7 @@ export default function Image() {
             textAlign: "center",
           }}
         >
-          Excise Revenue Recovery Portal
+          PAC Recovery Portal
         </div>
         <div
           style={{
@@ -76,7 +73,7 @@ export default function Image() {
             textAlign: "center",
           }}
         >
-          Data Period: 1 April 2021 to 31 March 2026
+          Dues from cases up to FY ending 31 March 2019
         </div>
       </div>
     ),

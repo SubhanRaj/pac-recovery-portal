@@ -117,37 +117,21 @@ export async function promptUnlockReason(districtName: string): Promise<string |
   return result.isConfirmed ? (result.value as string).trim() : null;
 }
 
-// Both clear flows are only reachable pre-lock (the buttons that call these disappear once the
-// district is submitted/locked, since submitAll() redirects away from this page) — clearing
-// never touches server data, only this browser's Dexie draft, so an Admin unlock never needs to
-// restore anything here.
-export async function confirmClearYear(yearLabel: string): Promise<boolean> {
+// Only reachable pre-lock (the button that calls this disappears once the period is
+// submitted/locked, since submitAll() redirects away from this page) — clears only this
+// component's in-memory React state, nothing server-side, no Dexie draft to restore (this
+// domain's single-period form has no multi-step draft, unlike the reference project's 5-year
+// wizard).
+export async function confirmClearForm(): Promise<boolean> {
   const result = await window.Swal.fire({
     icon: "warning",
-    title: `Clear ${yearLabel}?`,
+    title: "Clear this form?",
     html:
-      `This will erase all data entered for ${yearLabel} on this device. This cannot be undone.` +
-      `<br><br><span lang="hi">इससे इस डिवाइस पर ${yearLabel} के लिए दर्ज किया गया सभी डेटा मिट ` +
-      "जाएगा। यह पूर्ववत नहीं किया जा सकता।</span>",
+      "This will erase everything entered on this page. This cannot be undone." +
+      '<br><br><span lang="hi">इससे इस पृष्ठ पर दर्ज किया गया सभी डेटा मिट जाएगा। यह पूर्ववत ' +
+      "नहीं किया जा सकता।</span>",
     showCancelButton: true,
     confirmButtonText: "Yes, clear it",
-    cancelButtonText: "Cancel",
-    confirmButtonColor: "#dc2626",
-  });
-  return result.isConfirmed;
-}
-
-export async function confirmClearAll(): Promise<boolean> {
-  const result = await window.Swal.fire({
-    icon: "warning",
-    title: "Clear all 5 years?",
-    html:
-      "This will erase every year's entered data on this device and return to a blank form. " +
-      "This cannot be undone." +
-      '<br><br><span lang="hi">इससे इस डिवाइस पर सभी 5 वर्षों का दर्ज किया गया डेटा मिट जाएगा ' +
-      "और फॉर्म खाली हो जाएगा। यह पूर्ववत नहीं किया जा सकता।</span>",
-    showCancelButton: true,
-    confirmButtonText: "Yes, clear everything",
     cancelButtonText: "Cancel",
     confirmButtonColor: "#dc2626",
   });

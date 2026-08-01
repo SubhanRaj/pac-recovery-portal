@@ -1,9 +1,9 @@
 // Admin-only client-side navigation state, kept out of the URL entirely (no ?id=, no
 // ?status= query strings) — sessionStorage instead, same "set before navigating, read on
 // the destination page" shape as markJustAuthed()/consumeJustAuthed() in session.ts.
-const DISTRICT_ID_KEY = "excise-portal:nav-district-id";
-const STATUS_FILTER_KEY = "excise-portal:nav-status-filter";
-const NAV_DISTRICT_EVENT = "excise-portal:nav-district-id-changed";
+const DISTRICT_ID_KEY = "pac-recovery-portal:nav-district-id";
+const STATUS_FILTER_KEY = "pac-recovery-portal:nav-status-filter";
+const NAV_DISTRICT_EVENT = "pac-recovery-portal:nav-district-id-changed";
 
 // router.push("/admin/districts/detail") is a no-op when already on that route (same URL, no
 // remount), so the detail page's mount-only useEffect never re-reads sessionStorage — jumping

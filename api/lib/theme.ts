@@ -1,6 +1,6 @@
 export type Theme = "light" | "dark";
 
-const KEY = "excise-portal:theme";
+const KEY = "pac-recovery-portal:theme";
 
 export function getStoredTheme(): Theme | null {
   try {

@@ -16,10 +16,10 @@ export const COUNT_FIELDS: CountField[] = ["batteKhatteCount", "courtCaseCount"]
 // is my draft, not confirmed government-form language.
 export const DUES_FIELD_LABELS: Record<DuesField, string> = {
   recoveredThisPeriod: "3. इस अवधि में वसूल की गई धनराशि / Recovered This Period",
-  batteKhatteCount: "5. बट्टे खाते",
-  batteKhatteAmount: "5. आयुक्तालय को प्रेषित बट्टे खाते में डाले जाने वाले प्रकरणों की संख्या एवं उसमें निहित धनराशि / Batte Khatte",
-  courtCaseCount: "6. न्यायालय द्वारा स्थगित",
-  courtStayedAmount: "6. सक्षम न्यायालय द्वारा स्थगित प्रकरणों की संख्या एवं उसमें निहित धनराशि / Court Stayed",
+  batteKhatteCount: "5. बट्टे खाते — संख्या / Batte Khatte Count",
+  batteKhatteAmount: "5. आयुक्तालय को प्रेषित बट्टे खाते में डाले जाने वाले प्रकरणों की संख्या एवं उसमें निहित धनराशि / Batte Khatte Amount",
+  courtCaseCount: "6. न्यायालय द्वारा स्थगित — संख्या / Court Stayed Count",
+  courtStayedAmount: "6. सक्षम न्यायालय द्वारा स्थगित प्रकरणों की संख्या एवं उसमें निहित धनराशि / Court Stayed Amount",
 };
 
 export const TOTAL_DUES_LABEL = "1. वसूल की जाने वाली सकल धनराशि (31-मार्च-2019 तक) / Gross Dues (as on 31-Mar-2019)";
@@ -29,6 +29,20 @@ export const NET_RECOVERABLE_LABEL = "7. शुद्ध वसूल की ज
 
 export function isMoneyField(field: DuesField): field is MoneyField {
   return (MONEY_FIELDS as string[]).includes(field);
+}
+
+// Strips the " / <English>" half off a bilingual label — admin-facing views (Dashboard,
+// Districts table, Excel export) don't need the Hindi; only the DEO-facing form mirrors the
+// actual bilingual government form and keeps both halves.
+export function englishLabel(bilingual: string): string {
+  const parts = bilingual.split(" / ");
+  return parts[parts.length - 1];
+}
+
+// englishLabel() minus the government form's own numbering ("1.", "5.") — used by summary views
+// not laid out to mirror the form's field order/grouping, where the numbering is just noise.
+export function plainLabel(bilingual: string): string {
+  return englishLabel(bilingual).replace(/^\d+\.\s*/, "");
 }
 
 export interface NetRecoverableResult {

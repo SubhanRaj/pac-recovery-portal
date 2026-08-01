@@ -130,7 +130,7 @@ export default function AppHeader({ title, role, profile, navLinks, onSync, sync
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</p>
           <p className="hidden truncate text-xs text-slate-500 sm:block dark:text-slate-400">
-            Excise Revenue Recovery Portal
+            PAC Recovery Portal
           </p>
         </div>
 

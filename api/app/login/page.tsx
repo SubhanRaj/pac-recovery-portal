@@ -104,7 +104,7 @@ export default function LoginPage() {
         <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
           Department of Excise, Uttar Pradesh
         </h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Excise Revenue Recovery Portal</p>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">PAC Recovery Portal</p>
         <p className="mt-3 text-xs font-medium text-slate-600 dark:text-slate-300 md:whitespace-nowrap">
           {SITE_TITLE_EN}
         </p>

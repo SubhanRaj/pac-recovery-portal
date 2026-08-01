@@ -10,28 +10,27 @@ import "./globals.css";
 // MutationObserver, so blocking in <head> before <body> exists is the correct placement,
 // not a workaround.
 
-const TITLE = "Excise Revenue Recovery Portal | आबकारी विभाग, उत्तर प्रदेश";
+const TITLE = "PAC Recovery Portal | आबकारी विभाग, उत्तर प्रदेश";
 const DESCRIPTION = `${SITE_TITLE_EN}. ${DATA_PERIOD_EN}.`;
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://excisebakaya.exciseup.in"),
+  metadataBase: new URL("https://pacrecovery.exciseup.in"),
   title: TITLE,
   description: DESCRIPTION,
   keywords: [
-    "Excise Revenue Recovery Portal",
+    "PAC Recovery Portal",
     "Department of Excise Uttar Pradesh",
     "आबकारी विभाग उत्तर प्रदेश",
-    "Recovery Certificate",
     "PAC recovery",
     "excise arrears",
   ],
-  // robots.txt (frontend/public/robots.txt) is the actual gate on what gets crawled at all
-  // (only /login) — this stays index/follow at the metadata level since it's shared by every
-  // route in this single-layout app, /login included.
+  // robots.txt (public/robots.txt) is the actual gate on what gets crawled at all (only
+  // /login) — this stays index/follow at the metadata level since it's shared by every route
+  // in this single-layout app, /login included.
   openGraph: {
     title: TITLE,
     description: DESCRIPTION,
-    siteName: "Excise Revenue Recovery Portal",
+    siteName: "PAC Recovery Portal",
     url: "/login",
     type: "website",
     locale: "en_IN",
@@ -64,7 +63,7 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "(function(){try{var t=localStorage.getItem('excise-portal:theme');" +
+              "(function(){try{var t=localStorage.getItem('pac-recovery-portal:theme');" +
               "var d=t?t==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;" +
               "if(d)document.documentElement.classList.add('dark');}catch(e){}})();",
           }}

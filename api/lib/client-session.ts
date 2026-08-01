@@ -7,7 +7,7 @@ export type Role = "deo" | "admin";
 // "/" visit to) — it is never a source of truth for anything gated. Every gated page still
 // calls GET /api/auth/me before trusting anything; a missing/expired cookie 401s there exactly
 // like before.
-const LAST_ROLE_KEY = "excise-portal:last-role";
+const LAST_ROLE_KEY = "pac-recovery-portal:last-role";
 
 export function markLastRole(role: Role) {
   localStorage.setItem(LAST_ROLE_KEY, role);
@@ -23,7 +23,7 @@ export function clearLastRole(role: Role) {
 
 // One-shot flag set right before redirecting away from /login or /verify, so the destination
 // page can show a "Welcome" toast exactly once per sign-in rather than on every reload.
-const JUST_AUTHED_KEY = "excise-portal:just-authed";
+const JUST_AUTHED_KEY = "pac-recovery-portal:just-authed";
 
 export function markJustAuthed() {
   sessionStorage.setItem(JUST_AUTHED_KEY, "1");

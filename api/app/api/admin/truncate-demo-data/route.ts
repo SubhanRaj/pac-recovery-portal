@@ -12,10 +12,10 @@ import { withErrorHandling } from "@/lib/with-error-handling";
 const DEMO_DISTRICT_NAME = "Demo District";
 
 // One-off admin housekeeping action — permanently deletes the Demo District row, its pac_dues
-// rows, its unlock_requests, and the demo DEO's users row. Deliberately does NOT touch the
-// DEMO_CUG Worker secret or the frontend's prefix-exemption logic for it (app/login/page.tsx) —
-// those are the *mechanism* for a demo login, reusable if a new Demo District is ever seeded
-// again later; this endpoint only clears the *data* left over from the most recent demo run.
+// rows, its unlock_requests, and the demo DEO's users row. Unlike the old worker.js, there's no
+// separate DEMO_CUG-secret/prefix-exemption login mechanism to preserve here: the demo DEO's
+// cug_hash migrated into `users` like every real DEO's, so it logs in through the ordinary
+// verify-cug route — this endpoint only clears the *data* left over from the most recent demo run.
 export const POST = withErrorHandling("admin/truncate-demo-data", async (req: NextRequest) => {
   const session = await requireSession(req, "admin");
   if (!session) {
