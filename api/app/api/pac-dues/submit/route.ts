@@ -4,10 +4,13 @@ import { getDb } from "@/lib/db";
 import { pacDues, districts } from "@/db/schema";
 import { requireSession } from "@/lib/auth-guard";
 import { auditLogInsert } from "@/lib/audit";
-import { computeNetRecoverable } from "@/lib/dues-fields";
+import { computeNetRecoverable, validateRcDetails, type RcDetail } from "@/lib/dues-fields";
 import { withErrorHandling } from "@/lib/with-error-handling";
 
 type SubmitBody = {
+  rcCount: number;
+  rcAmount: number;
+  rcDetails: RcDetail[];
   recoveredThisPeriod: number;
   batteKhatteCount: number;
   batteKhatteAmount: number;
@@ -17,6 +20,8 @@ type SubmitBody = {
 };
 
 const NUMERIC_FIELDS = [
+  "rcCount",
+  "rcAmount",
   "recoveredThisPeriod",
   "batteKhatteCount",
   "batteKhatteAmount",
@@ -50,6 +55,10 @@ export const POST = withErrorHandling("pac-dues/submit", async (req: NextRequest
   }
   if (body.courtStayedAmount > 0 && body.courtCaseCount === 0) {
     return NextResponse.json({ error: "Court Case Count cannot be 0 when Stayed Amount is entered" }, { status: 400 });
+  }
+  const rcDetailsError = validateRcDetails(body.rcCount, body.rcAmount, Array.isArray(body.rcDetails) ? body.rcDetails : []);
+  if (rcDetailsError) {
+    return NextResponse.json({ error: rcDetailsError }, { status: 400 });
   }
 
   const db = getDb();
@@ -101,6 +110,9 @@ export const POST = withErrorHandling("pac-dues/submit", async (req: NextRequest
     db
       .update(pacDues)
       .set({
+        rcCount: body.rcCount,
+        rcAmount: body.rcAmount,
+        rcDetails: JSON.stringify(body.rcDetails),
         recoveredThisPeriod: body.recoveredThisPeriod,
         batteKhatteCount: body.batteKhatteCount,
         batteKhatteAmount: body.batteKhatteAmount,

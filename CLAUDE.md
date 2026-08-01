@@ -30,10 +30,14 @@ than being renamed, same as the reference project's own `api/` directory. Don't 
 `api/app/deo-data-entry/page.tsx` is a UI page, not an API route — everything under `api/app/api/`
 is the actual API surface; everything else under `api/app/` is a page.
 
-No `frontend/` Pages deployment anymore — the old `excise-bakaya-form`/`excise-bakaya-api`
-two-deployment setup is untouched but retired-in-spirit; the `frontend/` directory and its Pages
-project get torn down once the new portal is confirmed stable in production (not yet done as of
-this writing — see the migration plan §6 Q3).
+No `frontend/` Pages deployment anymore. **Retired 2026-08-01**: the old `excise-bakaya-form`
+Cloudflare Pages project and `excise-bakaya-api` Worker are both deleted from Cloudflare (neither
+was ever on a custom domain — see `pac-recovery-migration-plan.md` §0 — so this was a plain
+`wrangler delete`/`wrangler pages project delete`, no DNS involved); the `frontend/` directory
+itself is also deleted from this repo (still recoverable from git history, commit `8413e20` and
+earlier, if ever needed). The shared D1 database (`excise-bakaya-db`) and every table in it,
+including `excise_dues`, were **not** touched by this retirement — only the two old deployments
+that served requests were removed.
 
 **Never run a destructive Wrangler D1 command with `--remote`, and never `wrangler deploy`/push to
 `main`, without the user explicitly saying so for that specific change.** Local `--local` D1 work
@@ -61,6 +65,14 @@ are the authoritative reasoning) for the full column reference. Rules to preserv
   the client — `openingBalance` chains from the previous period's `netRecoverable` (or
   `totalDues − collectedTillDate` for a district's first period). See `lib/dues-fields.ts`'s
   `computeNetRecoverable()`.
+- **`pac_dues.rcCount`/`rcAmount`/`rcDetails`** (RC — Recovery Certificate — issued against
+  defaulters this period) — ported back in from the reference project's `pac_data.rc_*` fields on
+  2026-08-01, reversing the original migration plan's "explicitly dropped" call (§3). Purely
+  informational: never enters `computeNetRecoverable()`, same as the reference project's own RC
+  fields — an RC is issued to inform a defaulter what they owe, regardless of what's recovered.
+  `rcDetails` is a JSON-stringified `RcDetail[]` (`lib/dues-fields.ts`) whose amounts must sum to
+  `rcAmount`, enforced server-side (`validateRcDetails()`, called from the submit route) — never
+  trusted from the client.
 - No "Open Next Period" mechanic exists yet (provisionally decided as an explicit admin action,
   not a cron trigger — see migration plan §3, flagged as revisit-once-real-usage-is-known, not a
   final call). Building it is real, undone work, not a documentation gap.
@@ -141,10 +153,8 @@ the same class of leak as the CSV incident, caught before it happened this time.
 - **Language**: bilingual Hindi/English in the DEO-facing form (`app/deo-data-entry/page.tsx`) —
   this mirrors the actual government form. Admin-facing UI chrome stays English-only, matching the
   reference project's convention. Don't strip Hindi from DEO-facing field labels.
-- The DEO-facing Hindi field labels in `lib/dues-fields.ts` are a **draft**, not confirmed
-  government-form language, as of this migration — the pre-migration form's "8-Jul-26 तक/उपरांत"
-  (PAC-meeting-date) framing doesn't translate cleanly to a recurring monthly period. Get a
-  native-speaker/domain-expert pass before treating this copy as final.
+- The DEO-facing Hindi field labels in `lib/dues-fields.ts` were confirmed by the user on
+  2026-08-01 — no longer a draft, treat as final government-form language until told otherwise.
 - **Feedback split**: field-level errors render inline; multi-field/non-field-specific validation
   errors use a SweetAlert2 **toast** (`notifyToast()`); blocking confirms before an irreversible
   action (lock, admin unlock, truncate-demo, logout) use a SweetAlert2 **modal**. Don't add a new
@@ -184,5 +194,3 @@ the same class of leak as the CSV incident, caught before it happened this time.
 - Multi-admin `/admin/users`, bulk DEO provisioning, and a district-detail drill-in beyond the
   per-period table are all out of scope for this version — see migration plan §6.2/§6.5. Easy to
   add later if the portal grows past one admin/59-district seeding.
-- The old `excise-bakaya-form`/`excise-bakaya-api` deployment is still live, untouched, pending
-  retirement once the new portal is confirmed stable in production (migration plan §6 Q3).

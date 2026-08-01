@@ -46,6 +46,18 @@ export const pacDues = sqliteTable("pac_dues", {
   // netRecoverable.
   openingBalance: real("opening_balance").notNull(),
 
+  // RC (Recovery Certificate) issued against defaulters this period — informational, ported
+  // from the reference project's pac_data.rc_count/rc_amount/rc_details (see
+  // pac-recovery-migration-plan.md §3's "explicitly dropped" note, reversed on 2026-08-01 per
+  // instruction). Independent of recoveredThisPeriod/netRecoverable below — an RC is issued to
+  // inform a defaulter what they owe, for any amount, regardless of what's actually recovered,
+  // same as the reference project's own field (see lib/dues-fields.ts's RcDetail comment).
+  rcCount: integer("rc_count").default(0),
+  rcAmount: real("rc_amount").default(0),
+  // JSON-stringified RcDetail[] (see lib/dues-fields.ts) — one entry per RC, must sum to
+  // rcAmount, enforced server-side in the submit route, never trusted from the client.
+  rcDetails: text("rc_details").default("[]"),
+
   recoveredThisPeriod: real("recovered_this_period").default(0),
   batteKhatteCount: integer("batte_khatte_count").default(0),
   batteKhatteAmount: real("batte_khatte_amount").default(0),

@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { computeNetRecoverable, type DuesField } from "@/lib/dues-fields";
+import {
+  computeNetRecoverable,
+  syncRcDetailsToCount,
+  validateRcDetails,
+  RC_NUMBER_MAX_LENGTH,
+  type DuesField,
+  type DraftRcDetail,
+} from "@/lib/dues-fields";
 import { apiFetch, apiFetchForm, ApiError } from "@/lib/api";
 import { clearLastRole, consumeJustAuthed } from "@/lib/client-session";
 import { formatIST } from "@/lib/format";
@@ -13,10 +20,14 @@ import {
   confirmUnlockRequest,
   notifyToast,
 } from "@/lib/alerts";
+import Cleave from "cleave.js/react";
 import PacFieldInput from "@/components/PacFieldInput";
 import Button from "@/components/ui/Button";
+import Select from "@/components/ui/Select";
 import AppHeader from "@/components/ui/AppHeader";
 import HelpPanel from "@/components/ui/HelpPanel";
+
+type CleaveChangeEvent = React.ChangeEvent<HTMLInputElement> & { target: { rawValue: string } };
 import type { Profile } from "@/components/ui/ProfileMenu";
 import { SITE_TITLE_EN, SITE_TITLE_HI, DATA_PERIOD_EN, DATA_PERIOD_HI } from "@/lib/site";
 
@@ -34,6 +45,8 @@ type Draft = Record<DuesField, string>;
 
 function blankDraft(): Draft {
   return {
+    rcCount: "",
+    rcAmount: "",
     recoveredThisPeriod: "",
     batteKhatteCount: "",
     batteKhatteAmount: "",
@@ -55,6 +68,8 @@ export default function EntryPage() {
   const [totalDues, setTotalDues] = useState<number | null>(null);
   const [openingBalance, setOpeningBalance] = useState(0);
   const [draft, setDraft] = useState<Draft>(blankDraft());
+  const [rcDetails, setRcDetails] = useState<DraftRcDetail[]>([]);
+  const [rcDetailsTouched, setRcDetailsTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -94,18 +109,31 @@ export default function EntryPage() {
         const mine = await apiFetch<{
           totalDues: number | null;
           collectedTillDate: number | null;
-          current: { openingBalance: number } & Record<DuesField, number> | null;
+          current: ({ openingBalance: number; rcDetails: string } & Record<DuesField, number>) | null;
         }>("/api/pac-dues/mine", undefined, "deo");
         setTotalDues(mine.totalDues);
         if (mine.current) {
           setOpeningBalance(mine.current.openingBalance);
           setDraft({
+            rcCount: String(mine.current.rcCount),
+            rcAmount: String(mine.current.rcAmount),
             recoveredThisPeriod: String(mine.current.recoveredThisPeriod),
             batteKhatteCount: String(mine.current.batteKhatteCount),
             batteKhatteAmount: String(mine.current.batteKhatteAmount),
             courtCaseCount: String(mine.current.courtCaseCount),
             courtStayedAmount: String(mine.current.courtStayedAmount),
           });
+          try {
+            const parsed = JSON.parse(mine.current.rcDetails || "[]") as { rcNumber: string; rcAmount: number; stayed: boolean }[];
+            setRcDetails(
+              syncRcDetailsToCount(
+                parsed.map((d) => ({ rcNumber: d.rcNumber, rcAmount: String(d.rcAmount), stayed: d.stayed })),
+                mine.current.rcCount
+              )
+            );
+          } catch {
+            setRcDetails(syncRcDetailsToCount([], mine.current.rcCount));
+          }
         }
       } catch {
         // Best-effort — form just starts blank.
@@ -116,6 +144,13 @@ export default function EntryPage() {
 
   function updateField(field: DuesField, value: string) {
     setDraft((prev) => ({ ...prev, [field]: value }));
+    if (field === "rcCount") {
+      setRcDetails((prev) => syncRcDetailsToCount(prev, Number(value) || 0));
+    }
+  }
+
+  function updateRcDetail(index: number, field: keyof DraftRcDetail, value: string | boolean) {
+    setRcDetails((prev) => prev.map((d, i) => (i === index ? { ...d, [field]: value } : d)));
   }
 
   async function logoutLocked() {
@@ -150,6 +185,8 @@ export default function EntryPage() {
   async function clearForm() {
     if (!(await confirmClearForm())) return;
     setDraft(blankDraft());
+    setRcDetails([]);
+    setRcDetailsTouched(false);
   }
 
   const { duesLeft, netRecoverable } = computeNetRecoverable(
@@ -196,6 +233,19 @@ export default function EntryPage() {
       });
     }
 
+    const rcCount = Number(draft.rcCount) || 0;
+    const rcAmount = Number(draft.rcAmount) || 0;
+    const rcDetailsPayload = rcDetails.map((d) => ({
+      rcNumber: d.rcNumber.trim(),
+      rcAmount: Number(d.rcAmount) || 0,
+      stayed: d.stayed,
+    }));
+    const rcError = validateRcDetails(rcCount, rcAmount, rcDetailsPayload);
+    if (rcError) {
+      setRcDetailsTouched(true);
+      return notifyToast({ icon: "error", title: "RC Details / आर.सी. विवरण", text: rcError });
+    }
+
     const confirmed = await confirmFinalSubmit();
     if (!confirmed) return;
     const submittedByName = await promptDeoNameAndLock();
@@ -210,6 +260,9 @@ export default function EntryPage() {
           method: "POST",
           body: JSON.stringify({
             submittedByName,
+            rcCount,
+            rcAmount,
+            rcDetails: rcDetailsPayload,
             recoveredThisPeriod: Number(draft.recoveredThisPeriod),
             batteKhatteCount,
             batteKhatteAmount,
@@ -353,8 +406,10 @@ export default function EntryPage() {
         childrenHi={
           <>
             <p>
-              सभी पाँच फ़ील्ड भरें। कोई भी फ़ील्ड खाली नहीं छोड़ी जानी चाहिए — यदि वास्तव में कोई
-              राशि नहीं है तो 0 दर्ज करें।
+              सभी फ़ील्ड भरें। कोई भी फ़ील्ड खाली नहीं छोड़ी जानी चाहिए — यदि वास्तव में कोई राशि
+              नहीं है तो 0 दर्ज करें। यदि आर.सी. संख्या 0 से अधिक है, तो उतनी ही आर.सी. विवरण
+              पंक्तियाँ भरें (आर.सी. नंबर, आर.सी. राशि, क्या न्यायालय द्वारा स्थगित है) — उनकी
+              कुल राशि ऊपर दी गई आर.सी. राशि के बराबर होनी चाहिए।
             </p>
             <p>
               यह पोर्टल केवल 31 मार्च 2019 को समाप्त वित्तीय वर्ष तक उत्पन्न मामलों की बकाया
@@ -369,8 +424,10 @@ export default function EntryPage() {
         }
       >
         <p>
-          Enter all five fields. None may be left blank — type 0 if there is genuinely no
-          amount, so a blank never gets silently treated as zero.
+          Enter every field. None may be left blank — type 0 if there is genuinely no amount, so
+          a blank never gets silently treated as zero. If RC Count is more than 0, fill in that
+          many RC Detail rows (RC Number, RC Amount, whether a court has stayed that RC) — their
+          amounts must add up to the RC Amount above.
         </p>
         <p>
           This portal only tracks recovery of dues from cases originating up to FY ending 31
@@ -413,9 +470,100 @@ export default function EntryPage() {
             </label>
           </div>
 
+          <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <PacFieldInput
+              label="3. (i) जारी आर.सी. (R.C.) की संख्या / No. of RCs Issued"
+              value={draft.rcCount}
+              money={false}
+              onChange={(v) => updateField("rcCount", v)}
+            />
+            <PacFieldInput
+              label="3. (ii) आर.सी. में निहित धनराशि / RC Amount"
+              value={draft.rcAmount}
+              money
+              onChange={(v) => updateField("rcAmount", v)}
+            />
+          </div>
+
+          {rcDetails.length > 0 && (
+            <div className="mb-5 rounded-lg border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-1.5 border-b border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 dark:border-slate-800 dark:text-slate-300">
+                <i className="ti ti-list-details text-base text-blue-600 dark:text-blue-400" />
+                RC Details / आर.सी. विवरण ({rcDetails.length})
+              </div>
+              <div className="overflow-x-auto p-4">
+                <table className="w-full table-fixed border-collapse text-sm">
+                  <thead>
+                    <tr className="text-left text-xs font-semibold text-slate-600 dark:text-slate-400">
+                      <th className="w-8 py-1.5 pr-2">#</th>
+                      <th className="w-[34%] py-1.5 pr-2">RC Number</th>
+                      <th className="w-[34%] py-1.5 pr-2">RC Amount</th>
+                      <th className="w-32 py-1.5 text-center">
+                        <span className="block text-[10px] leading-tight font-semibold">Stayed by Court?</span>
+                        <span className="mt-0.5 block text-xs leading-normal normal-case" lang="hi">
+                          न्यायालय द्वारा स्थगित?
+                        </span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rcDetails.map((detail, i) => (
+                      <tr key={i} className="border-t border-slate-100 dark:border-slate-800">
+                        <td className="py-1.5 pr-2 tabular-nums text-slate-600 dark:text-slate-400">{i + 1}</td>
+                        <td className="py-1.5 pr-2">
+                          <input
+                            type="text"
+                            maxLength={RC_NUMBER_MAX_LENGTH}
+                            placeholder="RC Number"
+                            value={detail.rcNumber}
+                            onChange={(e) => updateRcDetail(i, "rcNumber", e.target.value)}
+                            onBlur={() => setRcDetailsTouched(true)}
+                            className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                          />
+                        </td>
+                        <td className="py-1.5 pr-2">
+                          <Cleave
+                            value={detail.rcAmount}
+                            onBlur={() => setRcDetailsTouched(true)}
+                            options={{
+                              numeral: true,
+                              numeralThousandsGroupStyle: "lakh",
+                              numeralDecimalScale: 2,
+                              prefix: "₹",
+                              rawValueTrimPrefix: true,
+                            }}
+                            onChange={(e: CleaveChangeEvent) => updateRcDetail(i, "rcAmount", e.target.rawValue)}
+                            className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                          />
+                        </td>
+                        <td className="py-1.5">
+                          <Select
+                            size="md"
+                            value={detail.stayed ? "yes" : "no"}
+                            onChange={(e) => updateRcDetail(i, "stayed", e.target.value === "yes")}
+                            className="w-full min-w-0"
+                          >
+                            <option value="no">No / नहीं</option>
+                            <option value="yes">Yes / हाँ</option>
+                          </Select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {rcDetailsTouched &&
+                  Math.abs(rcDetails.reduce((s, d) => s + (Number(d.rcAmount) || 0), 0) - (Number(draft.rcAmount) || 0)) > 0.01 && (
+                    <p className="mt-2 text-xs font-bold text-red-600 dark:text-red-400" lang="hi">
+                      आर.सी. विवरण की कुल राशि, आर.सी. राशि के बराबर होनी चाहिए। / RC Details total must equal RC Amount.
+                    </p>
+                  )}
+              </div>
+            </div>
+          )}
+
           <div className="mb-5">
             <PacFieldInput
-              label="3. इस अवधि में वसूल की गई धनराशि / Recovered This Period"
+              label="4. इस अवधि में वसूल की गई धनराशि / Recovered This Period"
               value={draft.recoveredThisPeriod}
               money
               onChange={(v) => updateField("recoveredThisPeriod", v)}
@@ -424,7 +572,7 @@ export default function EntryPage() {
 
           <label className="mb-5 block">
             <span className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
-              4. कुल बकाया धनराशि / Total Dues Left
+              5. कुल बकाया धनराशि / Total Dues Left
             </span>
             <div className="rounded-md border border-slate-200 bg-slate-100 px-3 py-2.5 text-sm font-semibold text-slate-900 dark:border-slate-800 dark:bg-slate-800 dark:text-slate-100">
               ₹{duesLeft.toLocaleString("en-IN")}
@@ -433,13 +581,13 @@ export default function EntryPage() {
 
           <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <PacFieldInput
-              label="5. बट्टे खाते — संख्या / Batte Khatte Count"
+              label="6. बट्टे खाते — संख्या / Batte Khatte Count"
               value={draft.batteKhatteCount}
               money={false}
               onChange={(v) => updateField("batteKhatteCount", v)}
             />
             <PacFieldInput
-              label="5. बट्टे खाते — धनराशि / Batte Khatte Amount"
+              label="6. बट्टे खाते — धनराशि / Batte Khatte Amount"
               value={draft.batteKhatteAmount}
               money
               onChange={(v) => updateField("batteKhatteAmount", v)}
@@ -448,13 +596,13 @@ export default function EntryPage() {
 
           <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <PacFieldInput
-              label="6. न्यायालय द्वारा स्थगित — संख्या / Court Stayed Count"
+              label="7. न्यायालय द्वारा स्थगित — संख्या / Court Stayed Count"
               value={draft.courtCaseCount}
               money={false}
               onChange={(v) => updateField("courtCaseCount", v)}
             />
             <PacFieldInput
-              label="6. न्यायालय द्वारा स्थगित — धनराशि / Court Stayed Amount"
+              label="7. न्यायालय द्वारा स्थगित — धनराशि / Court Stayed Amount"
               value={draft.courtStayedAmount}
               money
               onChange={(v) => updateField("courtStayedAmount", v)}
@@ -463,7 +611,7 @@ export default function EntryPage() {
 
           <label className="mb-6 block">
             <span className="mb-1.5 block text-sm font-bold text-emerald-700 dark:text-emerald-400">
-              7. शुद्ध वसूल की जाने वाली धनराशि / Net Recoverable
+              8. शुद्ध वसूल की जाने वाली धनराशि / Net Recoverable
             </span>
             <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-3 text-lg font-bold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400">
               ₹{netRecoverable.toLocaleString("en-IN")}

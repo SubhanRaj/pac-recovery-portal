@@ -51,6 +51,12 @@ See `api/db/schema.ts` for the full column reference and inline reasoning. Key p
     metadata (`unlockedAt`/`unlockReason`/`unlockedBy`) all live here, **per period** — unlike the
     original single-snapshot version (or the reference project's district-lifetime lock), a
     district's lock state is scoped to one month, not forever.
+*   **`pac_dues.rcCount`/`rcAmount`/`rcDetails`** — RCs (Recovery Certificates) issued against
+    defaulters this period, ported in from `excise-revenue-recovery-portal`'s `pac_data.rc_*`
+    fields. Informational only: independent of `recoveredThisPeriod`/`netRecoverable`, an RC
+    tells a defaulter what they owe regardless of what's actually recovered. `rcDetails` is a
+    JSON `RcDetail[]` (`rcNumber`, `rcAmount`, `stayed`) — one entry per RC, its amounts must sum
+    to `rcAmount`, enforced server-side (never trusted from the client).
 *   **`users`** — `role: "deo" | "admin"`. DEOs are keyed by `cugHash` (SHA-256 of their 10-digit
     CUG mobile number); admins by `email` (magic-link recipient).
 *   No "Open Next Period" mechanic is built yet — see `pac-recovery-migration-plan.md` §3. Today
@@ -70,12 +76,16 @@ for a live preview:
 2.  **शुद्ध वसूल की जाने वाली धनराशि (Net Recoverable)** = `max(0, Total Dues Left − batteKhatteAmount − courtStayedAmount)`
 3.  **Submit is rejected (400)** server-side if `batteKhatteAmount > Total Dues Left`, or
     `courtStayedAmount > (Total Dues Left − batteKhatteAmount)`.
+4.  **RC Details must reconcile**: if `rcCount > 0`, exactly that many `RcDetail` rows are
+    required and their `rcAmount`s must sum to the period's `rcAmount` (± ₹0.01) — RCs are
+    informational and never enter the Total Dues Left/Net Recoverable formulas above.
 
 ## DEO Flow (`/login` → `/deo-data-entry`)
 
 Single-page form (no multi-step wizard — this domain has one period at a time, not a multi-year
 loop). CUG login → session cookie → form pre-filled from the district's current period (read-only
-Total Dues/Opening Balance, editable Recovered This Period/Batte Khatte/Court Stayed) → two-step
+Total Dues/Opening Balance, editable RC Count/Amount + per-RC breakdown, Recovered This
+Period/Batte Khatte/Court Stayed) → two-step
 lock confirm (plain "are you sure" dialog, then a name-entry prompt with a liability disclaimer,
 validated against blank/digits/designation-words) → `POST /api/pac-dues/submit` locks the period.
 A locked DEO can file a self-service unlock request (`POST /api/deo/request-unlock`) instead of
@@ -112,6 +122,107 @@ shared-secret header anywhere, since UI and API share an origin.
 | `/api/admin/unlock-requests/resolve` | POST | Approve/deny an unlock request. |
 | `/api/admin/audit-log` | GET | Paginated audit trail (30-day retention, pruned on read). |
 | `/api/admin/truncate-demo-data` | POST | Deletes the hardcoded `Demo District` row only. |
+
+## App Flow
+
+Snapshot as of this build — regenerate by hand if the flow changes materially.
+
+### 1. Authentication (both login paths)
+
+```mermaid
+flowchart TD
+    Start(["DEO or Admin visits /login"]) --> Choice{"Login method"}
+
+    Choice -->|"CUG Mobile"| CugHash["Hash 10-digit CUG number<br/>(Web Crypto, client-side —<br/>raw number never sent)"]
+    CugHash --> VerifyCug["POST /api/auth/verify-cug<br/>(rate-limited per IP)"]
+    VerifyCug --> CugCheck{"cug_hash match?"}
+    CugCheck -->|"no"| CugErr["401 Invalid CUG number"]
+    CugCheck -->|"yes"| Session
+
+    Choice -->|"Admin email"| ReqLink["POST /api/auth/request-magic-link<br/>(rate-limited per user)"]
+    ReqLink --> EmailSent["Resend sends magic-link email<br/>(noreply@mail.exciseup.in)"]
+    EmailSent --> VerifyPage["/verify?token=…"]
+    VerifyPage --> VerifyMagic["POST /api/auth/verify-magic-link"]
+    VerifyMagic --> TokenCheck{"token valid,<br/>unused, unexpired?"}
+    TokenCheck -->|"no"| MagicErr["401 invalid or expired"]
+    TokenCheck -->|"yes"| Session
+
+    Session["Set-Cookie: __deo_session /<br/>__admin_session<br/>(HttpOnly, Secure, SameSite=Lax,<br/>7-day JWT via jose)"] --> RoleCheck{"role"}
+    RoleCheck -->|"deo"| DeoHome["/deo-data-entry"]
+    RoleCheck -->|"admin"| AdminHome["/admin"]
+
+    style Session fill:#16a34a,color:#fff
+    style CugErr fill:#dc2626,color:#fff
+    style MagicErr fill:#dc2626,color:#fff
+```
+
+### 2. DEO data entry — single period, no wizard
+
+```mermaid
+flowchart TD
+    Login(["DEO logs in"]) --> Me["GET /api/auth/me?role=deo"]
+    Me --> LockCheck{"currentPeriod.lockStatus"}
+
+    LockCheck -->|"locked"| LockedScreen["Data Already Locked screen<br/>(read-only, shows locked-by/at)"]
+    LockedScreen --> PendingCheck{"pendingUnlockRequest?"}
+    PendingCheck -->|"yes"| PendingBanner["Pending since … banner<br/>no resubmit until resolved"]
+    PendingCheck -->|"no"| ReqUnlock["Request Unlock button<br/>→ textarea, reason required"]
+    ReqUnlock --> PostUnlock["POST /api/deo/request-unlock<br/>(FormData)"]
+    PostUnlock --> PendingBanner
+
+    LockCheck -->|"unlocked"| Mine["GET /api/pac-dues/mine<br/>totalDues, collectedTillDate,<br/>current period row"]
+    Mine --> Form["Form pre-filled: Opening Balance<br/>(read-only) + RC Count/Amount +<br/>RC Detail rows + Recovered This<br/>Period + Batte Khatte + Court Stayed"]
+    Form --> LiveCalc["Live preview: Total Dues Left,<br/>Net Recoverable (computeNetRecoverable)"]
+    LiveCalc --> ClientValidate{"Anti-blank, count/amount<br/>synchrony, RC Details sum<br/>= RC Amount, math-safety gate"}
+    ClientValidate -->|"fails"| Toast["SweetAlert2 toast, no submit"]
+    ClientValidate -->|"passes"| Confirm1["confirmFinalSubmit()<br/>plain are-you-sure dialog"]
+    Confirm1 --> Confirm2["promptDeoNameAndLock()<br/>name + liability disclaimer"]
+    Confirm2 --> Submit["POST /api/pac-dues/submit"]
+
+    Submit --> ServerValidate{"Server re-validates:<br/>non-negative, synchrony,<br/>validateRcDetails(), math-safety,<br/>not already locked (409)"}
+    ServerValidate -->|"fails"| Rejected["400/409 — form shows error,<br/>nothing written"]
+    ServerValidate -->|"passes"| Lock["Server computes netRecoverable,<br/>sets lockStatus=1, lockedAt,<br/>submittedByName + audit_log"]
+    Lock --> Done(["Submitted & Locked —<br/>redirect to /login"])
+
+    style Lock fill:#16a34a,color:#fff
+    style Done fill:#16a34a,color:#fff
+    style Rejected fill:#dc2626,color:#fff
+    style Toast fill:#f59e0b,color:#000
+```
+
+### 3. Admin dashboard — Dexie-first, unlock, export
+
+```mermaid
+flowchart TD
+    AdminLogin(["Admin logs in -> /admin"]) --> CacheCheck{"Dexie IndexedDB cache<br/>(adminDistricts/adminPacDues)<br/>populated?"}
+
+    CacheCheck -->|"yes"| UseCache["Render from cache immediately<br/>no D1 query"]
+    CacheCheck -->|"empty / manual Sync"| Fetch["GET /api/admin/districts<br/>full districts + pac_dues dump"]
+    Fetch --> StoreCache[("db.transaction: clear + bulkPut<br/>into adminDistricts/adminPacDues")]
+    StoreCache --> UseCache
+
+    UseCache --> Dashboard["/admin: KPI cards, top-15 chart,<br/>lock-status donut (AdminDashboard.tsx)"]
+    UseCache --> Districts["/admin/districts: TanStack Table,<br/>search/sort/paginate, RC + dues columns"]
+    UseCache --> Detail["/admin/districts/detail:<br/>every period this district has had"]
+
+    Districts --> UnlockClick["Unlock button on a locked row"]
+    Detail --> UnlockClick
+    UnlockClick --> Reason["promptUnlockReason()"]
+    Reason --> PostUnlock["POST /api/admin/unlock<br/>{ districtId, period, reason }"]
+    PostUnlock --> PatchBoth["Patch React state + Dexie row<br/>lockStatus=0, unlockedAt/Reason/By"]
+
+    UseCache --> UnlockReqPage["/admin/unlock-requests"]
+    UnlockReqPage --> Resolve{"Approve or deny?"}
+    Resolve -->|"approve"| ResolveApprove["POST …/resolve<br/>unlocks the (district,period) too"]
+    Resolve -->|"deny"| ResolveDeny["POST …/resolve<br/>adminNote required"]
+
+    UseCache --> Export["Export button (lib/export.ts)"]
+    Export --> Xlsx["ExcelJS: Summary + Districts<br/>(RC/dues columns) + Lock Status sheets<br/>— frozen header, A4 landscape"]
+    Export --> Sql["Plain-text SQL backup:<br/>districts + pac_dues INSERTs"]
+
+    style UseCache fill:#16a34a,color:#fff
+    style PatchBoth fill:#16a34a,color:#fff
+```
 
 ## Getting started
 

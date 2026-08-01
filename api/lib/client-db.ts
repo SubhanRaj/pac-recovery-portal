@@ -18,6 +18,9 @@ export type CachedPacDues = {
   districtId: number;
   period: string;
   openingBalance: number;
+  rcCount: number;
+  rcAmount: number;
+  rcDetails: string;
   recoveredThisPeriod: number;
   batteKhatteCount: number;
   batteKhatteAmount: number;

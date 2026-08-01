@@ -1,5 +1,6 @@
 import type { Cell } from "exceljs";
 import { DUES_FIELD_LABELS, MONEY_FIELDS, TOTAL_DUES_LABEL, OPENING_BALANCE_LABEL, DUES_LEFT_LABEL, NET_RECOVERABLE_LABEL, englishLabel } from "./dues-fields";
+import { DUES_FIELD_ORDER } from "./dues-row";
 import { SITE_TITLE_EN, DATA_PERIOD_EN } from "./site";
 import { formatIST } from "./format";
 import type { CachedDistrict, CachedPacDues } from "./client-db";
@@ -67,8 +68,6 @@ async function downloadWorkbook(wb: InstanceType<typeof window.ExcelJS.Workbook>
   a.click();
   URL.revokeObjectURL(url);
 }
-
-const DUES_FIELD_ORDER = ["recoveredThisPeriod", "batteKhatteCount", "batteKhatteAmount", "courtCaseCount", "courtStayedAmount"] as const;
 
 // One workbook: a Summary cover sheet, a Districts sheet (every district's latest period, one
 // row each), and a Lock Status sheet — much flatter than the reference project's per-FY sheets
@@ -235,8 +234,8 @@ export function exportDistrictsToSql(districts: CachedDistrict[], pacDues: Cache
 
   for (const p of [...pacDues].sort((a, b) => a.id - b.id)) {
     lines.push(
-      `INSERT INTO pac_dues (id, district_id, period, opening_balance, recovered_this_period, batte_khatte_count, batte_khatte_amount, court_case_count, court_stayed_amount, net_recoverable, lock_status, locked_at, submitted_by_name, unlocked_at, unlock_reason, unlocked_by) VALUES ` +
-        `(${p.id}, ${p.districtId}, ${sqlLiteral(p.period)}, ${p.openingBalance}, ${p.recoveredThisPeriod}, ${p.batteKhatteCount}, ${p.batteKhatteAmount}, ${p.courtCaseCount}, ${p.courtStayedAmount}, ${p.netRecoverable}, ${p.lockStatus}, ${sqlLiteral(p.lockedAt)}, ${sqlLiteral(p.submittedByName)}, ${sqlLiteral(p.unlockedAt)}, ${sqlLiteral(p.unlockReason)}, ${sqlLiteral(p.unlockedBy)});`
+      `INSERT INTO pac_dues (id, district_id, period, opening_balance, rc_count, rc_amount, rc_details, recovered_this_period, batte_khatte_count, batte_khatte_amount, court_case_count, court_stayed_amount, net_recoverable, lock_status, locked_at, submitted_by_name, unlocked_at, unlock_reason, unlocked_by) VALUES ` +
+        `(${p.id}, ${p.districtId}, ${sqlLiteral(p.period)}, ${p.openingBalance}, ${p.rcCount}, ${p.rcAmount}, ${sqlLiteral(p.rcDetails)}, ${p.recoveredThisPeriod}, ${p.batteKhatteCount}, ${p.batteKhatteAmount}, ${p.courtCaseCount}, ${p.courtStayedAmount}, ${p.netRecoverable}, ${p.lockStatus}, ${sqlLiteral(p.lockedAt)}, ${sqlLiteral(p.submittedByName)}, ${sqlLiteral(p.unlockedAt)}, ${sqlLiteral(p.unlockReason)}, ${sqlLiteral(p.unlockedBy)});`
     );
   }
 
