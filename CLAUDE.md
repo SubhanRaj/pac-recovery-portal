@@ -150,6 +150,10 @@ committing the file.
   just "no error thrown."
 - Destructive/irreversible admin actions (unlock, truncate-demo) use a red (`#dc2626`) confirm
   button and Hindi cancel text, matching the DEO-side lock/logout dialogs.
+- **Routine create/edit forms use a slide-in drawer** (`components/ui/AdminUserDrawer.tsx`), not a
+  SweetAlert2 form dialog — a Swal popup is reserved for the toast/blocking-confirm cases above,
+  not multi-field data entry. If you add another admin CRUD flow, follow this same drawer shape
+  rather than building a new modal.
 
 ## Deployment & CI/CD
 

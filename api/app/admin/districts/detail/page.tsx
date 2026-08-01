@@ -34,12 +34,33 @@ export default function DistrictDetailPage() {
   const district = districts.find((d) => d.id === districtId);
   // Every period this district has ever had, most recent first — unlike the reference project's
   // fixed 5-FY column matrix, this domain can accumulate an arbitrary number of periods over
-  // time (see pac-recovery-migration-plan.md §3's "Open Next Period" mechanic).
+  // time. Table layout is transposed from the reference project's too: periods are rows and
+  // fields are columns here (arbitrary-many periods, fixed few fields), the opposite of its
+  // fixed-5-years-as-columns / fields-as-rows shape.
   const periodRows = useMemo(
     () => pacDues.filter((p) => p.districtId === districtId).sort((a, b) => (a.period < b.period ? 1 : -1)),
     [pacDues, districtId]
   );
   const current = periodRows[0];
+
+  // Ported from the reference project's district-detail search (same "match raw or ₹-formatted
+  // value, case-insensitive" logic) — filters which period *rows* here since periods are rows
+  // in this layout, where the reference filters which *fields* are shown (fields are its rows).
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const visiblePeriodRows = q
+    ? periodRows.filter((row) => {
+        if (row.period.toLowerCase().includes(q)) return true;
+        const moneyValues = [row.openingBalance, row.netRecoverable];
+        if (moneyValues.some((v) => String(v).includes(q) || `₹${v.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`.toLowerCase().includes(q))) {
+          return true;
+        }
+        return DUES_FIELD_ORDER.some((field) => {
+          const value = row[field];
+          return String(value).includes(q) || formatValue(field, value).toLowerCase().includes(q);
+        });
+      })
+    : periodRows;
 
   async function handleUnlock(id: number, name: string, period: string) {
     const reason = await promptUnlockReason(name);
@@ -151,6 +172,16 @@ export default function DistrictDetailPage() {
               )}
             </div>
 
+            <div className="mb-3">
+              <input
+                type="text"
+                placeholder="Search period or amount..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="w-full max-w-sm rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              />
+            </div>
+
             <div className="overflow-auto rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <table className="w-full border-collapse text-sm">
                 <thead>
@@ -184,8 +215,14 @@ export default function DistrictDetailPage() {
                         No periods recorded for this district yet.
                       </td>
                     </tr>
+                  ) : visiblePeriodRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={DUES_FIELD_ORDER.length + 3} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">
+                        No periods match &quot;{query}&quot;.
+                      </td>
+                    </tr>
                   ) : (
-                    periodRows.map((row) => (
+                    visiblePeriodRows.map((row) => (
                       <tr key={row.id} className="border-t border-slate-100 bg-white dark:border-slate-800 dark:bg-slate-900">
                         <td className="whitespace-nowrap px-3 py-2.5 font-medium text-slate-700 dark:text-slate-300">{row.period}</td>
                         <td className="whitespace-nowrap px-3 py-2.5 text-slate-800 dark:text-slate-200">

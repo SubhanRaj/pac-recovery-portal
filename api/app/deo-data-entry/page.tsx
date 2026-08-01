@@ -70,6 +70,10 @@ export default function EntryPage() {
   const [draft, setDraft] = useState<Draft>(blankDraft());
   const [rcDetails, setRcDetails] = useState<DraftRcDetail[]>([]);
   const [rcDetailsTouched, setRcDetailsTouched] = useState(false);
+  const [rcDetailsOpen, setRcDetailsOpen] = useState(true);
+  const [rcTouched, setRcTouched] = useState(false);
+  const [batteTouched, setBatteTouched] = useState(false);
+  const [courtTouched, setCourtTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -187,6 +191,9 @@ export default function EntryPage() {
     setDraft(blankDraft());
     setRcDetails([]);
     setRcDetailsTouched(false);
+    setRcTouched(false);
+    setBatteTouched(false);
+    setCourtTouched(false);
   }
 
   const { duesLeft, netRecoverable } = computeNetRecoverable(
@@ -195,6 +202,15 @@ export default function EntryPage() {
     Number(draft.batteKhatteAmount) || 0,
     Number(draft.courtStayedAmount) || 0
   );
+
+  // Inline count-vs-amount checks, ported from the reference project's YearStepForm — the
+  // submit-time toast (below) is the real zero-trust gate, this is just earlier feedback.
+  const rcCountInvalid = (Number(draft.rcAmount) || 0) > 0 && (Number(draft.rcCount) || 0) === 0;
+  const batteCountInvalid = (Number(draft.batteKhatteAmount) || 0) > 0 && (Number(draft.batteKhatteCount) || 0) === 0;
+  const courtCountInvalid = (Number(draft.courtStayedAmount) || 0) > 0 && (Number(draft.courtCaseCount) || 0) === 0;
+  const rcAmountTotal = Number(draft.rcAmount) || 0;
+  const rcDetailsSum = rcDetails.reduce((s, d) => s + (Number(d.rcAmount) || 0), 0);
+  const rcDetailsMismatch = rcDetails.length > 0 && Math.abs(rcDetailsSum - rcAmountTotal) > 0.01;
 
   async function submitAll() {
     const blank = (Object.keys(draft) as DuesField[]).some((f) => draft[f].trim() === "");
@@ -476,21 +492,32 @@ export default function EntryPage() {
               value={draft.rcCount}
               money={false}
               onChange={(v) => updateField("rcCount", v)}
+              onBlur={() => setRcTouched(true)}
+              error={rcTouched && rcCountInvalid ? COUNT_MISMATCH_TITLE : undefined}
             />
             <PacFieldInput
               label="3. (ii) आर.सी. में निहित धनराशि / RC Amount"
               value={draft.rcAmount}
               money
               onChange={(v) => updateField("rcAmount", v)}
+              onBlur={() => setRcTouched(true)}
             />
           </div>
 
           {rcDetails.length > 0 && (
             <div className="mb-5 rounded-lg border border-slate-200 dark:border-slate-800">
-              <div className="flex items-center gap-1.5 border-b border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 dark:border-slate-800 dark:text-slate-300">
-                <i className="ti ti-list-details text-base text-blue-600 dark:text-blue-400" />
-                RC Details / आर.सी. विवरण ({rcDetails.length})
-              </div>
+              <button
+                type="button"
+                onClick={() => setRcDetailsOpen((v) => !v)}
+                className="flex w-full items-center justify-between gap-2 border-b border-slate-200 px-4 py-2.5 text-left text-sm font-medium text-slate-700 dark:border-slate-800 dark:text-slate-300"
+              >
+                <span className="flex items-center gap-1.5">
+                  <i className="ti ti-list-details text-base text-blue-600 dark:text-blue-400" />
+                  RC Details / आर.सी. विवरण ({rcDetails.length})
+                </span>
+                <i className={`ti text-base ${rcDetailsOpen ? "ti-chevron-up" : "ti-chevron-down"}`} />
+              </button>
+              {rcDetailsOpen && (
               <div className="overflow-x-auto p-4">
                 <table className="w-full table-fixed border-collapse text-sm">
                   <thead>
@@ -551,13 +578,25 @@ export default function EntryPage() {
                     ))}
                   </tbody>
                 </table>
-                {rcDetailsTouched &&
-                  Math.abs(rcDetails.reduce((s, d) => s + (Number(d.rcAmount) || 0), 0) - (Number(draft.rcAmount) || 0)) > 0.01 && (
-                    <p className="mt-2 text-xs font-bold text-red-600 dark:text-red-400" lang="hi">
-                      आर.सी. विवरण की कुल राशि, आर.सी. राशि के बराबर होनी चाहिए। / RC Details total must equal RC Amount.
-                    </p>
-                  )}
+                <div
+                  className={`mt-3 flex items-center justify-between text-xs ${
+                    rcDetailsTouched && rcDetailsMismatch
+                      ? "font-bold text-red-600 dark:text-red-400"
+                      : "text-slate-600 dark:text-slate-400"
+                  }`}
+                >
+                  <span>
+                    Entered: ₹{rcDetailsSum.toLocaleString("en-IN", { minimumFractionDigits: 2 })} / Required: ₹
+                    {rcAmountTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                {rcDetailsTouched && rcDetailsMismatch && (
+                  <p className="mt-1 text-xs font-bold text-red-600 dark:text-red-400" lang="hi">
+                    आर.सी. विवरण की कुल राशि, आर.सी. राशि के बराबर होनी चाहिए। / RC Details total must equal RC Amount.
+                  </p>
+                )}
               </div>
+              )}
             </div>
           )}
 
@@ -585,12 +624,15 @@ export default function EntryPage() {
               value={draft.batteKhatteCount}
               money={false}
               onChange={(v) => updateField("batteKhatteCount", v)}
+              onBlur={() => setBatteTouched(true)}
+              error={batteTouched && batteCountInvalid ? COUNT_MISMATCH_TITLE : undefined}
             />
             <PacFieldInput
               label="6. बट्टे खाते — धनराशि / Batte Khatte Amount"
               value={draft.batteKhatteAmount}
               money
               onChange={(v) => updateField("batteKhatteAmount", v)}
+              onBlur={() => setBatteTouched(true)}
             />
           </div>
 
@@ -600,12 +642,15 @@ export default function EntryPage() {
               value={draft.courtCaseCount}
               money={false}
               onChange={(v) => updateField("courtCaseCount", v)}
+              onBlur={() => setCourtTouched(true)}
+              error={courtTouched && courtCountInvalid ? COUNT_MISMATCH_TITLE : undefined}
             />
             <PacFieldInput
               label="7. न्यायालय द्वारा स्थगित — धनराशि / Court Stayed Amount"
               value={draft.courtStayedAmount}
               money
               onChange={(v) => updateField("courtStayedAmount", v)}
+              onBlur={() => setCourtTouched(true)}
             />
           </div>
 
