@@ -8,7 +8,7 @@ export default defineConfig({
   fullyParallel: true,
   reporter: "list",
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? "https://excisebakaya.exciseup.in",
+    baseURL: process.env.E2E_BASE_URL ?? "https://pacrecovery.exciseup.in",
     trace: "retain-on-failure",
     // Headless: this runs in a sandboxed/non-interactive environment with no window
     // server. Drop HEADLESS=false locally if you want to watch it run.

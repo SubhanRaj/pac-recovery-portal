@@ -5,7 +5,9 @@ recovery of dues from cases originating up to FY ending 31-Mar-2019, across 75 d
 Excise Officers (DEOs) submit recovery figures every month; an Admin reviews, exports, and can
 unlock a district's period for re-entry.
 
-See [CLAUDE.md](./CLAUDE.md) for the rules an AI agent must follow when working in this repo.
+See [CLAUDE.md](./CLAUDE.md) for the rules an AI agent must follow when working in this repo,
+[SECURITY.md](./SECURITY.md) for the security architecture, [DEPLOY.md](./DEPLOY.md) for
+production state and deploy commands, and [TESTING.md](./TESTING.md) for how to test a change.
 
 ## Tech Stack
 
@@ -227,17 +229,11 @@ pnpm run preview                 # closer to production: builds via OpenNext, re
 
 ## Deploying
 
-Live at `https://pacrecovery.exciseup.in` (Cloudflare Workers Custom Domain — auto-provisions its
-own DNS on deploy, see `api/wrangler.jsonc`'s `custom_domain: true` route) as a single Cloudflare
-Worker + D1. **Never run `wrangler deploy`, a `--remote` D1 command, or push to `main` (which
-triggers `deploy.yml`) without the user explicitly saying so for that specific change** — this
-project has live production data and real government users.
-
-*   `.github/workflows/ci.yml` — `tsc --noEmit` + `next build` on every push/PR touching `api/`.
-*   `.github/workflows/deploy.yml` — `pnpm run deploy` on push to `main`, requires
-    `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` in GitHub Secrets.
-*   Remote secrets (Wrangler secrets, not `wrangler.jsonc` vars): `JWT_SECRET`, `RESEND_API_KEY`,
-    `FRONTEND_URL`, `FROM_EMAIL`.
+Live at `https://pacrecovery.exciseup.in` as a single Cloudflare Worker + D1. **Never run
+`wrangler deploy`, a `--remote` D1 command, or push to `main` (which triggers `deploy.yml`)
+without the user explicitly saying so for that specific change** — this project has live
+production data and real government users. See [DEPLOY.md](./DEPLOY.md) for the full production
+resource table, CI/CD wiring, secrets, and redeploy/rollback commands.
 
 ## Scripts and Data (`scripts_and_data/`)
 

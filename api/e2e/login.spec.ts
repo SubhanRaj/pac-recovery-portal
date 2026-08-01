@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 
-const API_URL = process.env.E2E_API_URL ?? "https://excisebakaya.exciseup.in";
+const API_URL = process.env.E2E_API_URL ?? "https://pacrecovery.exciseup.in";
 const SUPERADMIN_EMAIL = "shubhanraj2002@gmail.com";
 const API_DIR = path.resolve(__dirname, "..");
 
@@ -16,7 +16,7 @@ function latestUnusedToken(): string {
       "wrangler",
       "d1",
       "execute",
-      "excise-revenue-recovery-db",
+      "excise-bakaya-db",
       "--remote",
       "--json",
       "--command",
@@ -70,9 +70,8 @@ test.describe("magic-link verify (live D1 round-trip)", () => {
 
     // The actual bug report: silently landing back on /login is a failure, not a pass-through.
     await page.waitForURL(/\/(admin|login)/, { timeout: 10_000 });
-    // Session auth is an HttpOnly `__admin_session` cookie now (see api/lib/session.ts,
-    // ROADMAP.md's Milestone 36) — not readable from page JS by design, so check via the
-    // browser context's cookie jar instead of localStorage.
+    // Session auth is an HttpOnly `__admin_session` cookie (see api/lib/session.ts) — not
+    // readable from page JS by design, so check via the browser context's cookie jar.
     const cookies = await page.context().cookies();
     const adminCookie = cookies.find((c) => c.name === "__admin_session");
 

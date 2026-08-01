@@ -2,8 +2,10 @@
 
 Instructions for AI agents working in this repo. [.agents/AGENTS.md](./.agents/AGENTS.md) has the
 core directives (stack limits, no new frameworks without permission, no schema/math changes
-without instruction) — read that too. See [README.md](./README.md) for what the system does. This
-file documents rules to preserve, not a build log.
+without instruction) — read that too. See [README.md](./README.md) for what the system does,
+[SECURITY.md](./SECURITY.md) for the security architecture, [DEPLOY.md](./DEPLOY.md) for
+production state and deploy commands, and [TESTING.md](./TESTING.md) for how to test a change.
+This file documents rules to preserve, not a build log.
 
 ## What this is
 
@@ -89,14 +91,13 @@ overview. Rules to preserve:
 
 ## Security
 
-**Never commit anything under `scripts_and_data/` that isn't already gitignore-excluded by
-pattern** — check `.gitignore`'s `scripts_and_data/*.sql`, `*.csv`, `*.txt`, `*.py`, `*hash*`, and
-`scripts_and_data/backups/` rules before adding a new data-processing script or export there; if a
-new file type doesn't match an existing pattern, add the pattern rather than committing the file.
-`scripts_and_data/backups/` needs its own explicit gitignore rule — a bare `scripts_and_data/*.sql`
-pattern does not cover `scripts_and_data/backups/*.sql`, since gitignore globs don't cross a `/`
-boundary. D1 export backups can contain real `cug_hash`/`deo_email` values; treat any new
-subdirectory under `scripts_and_data/` the same way until it's covered by a pattern.
+See [SECURITY.md](./SECURITY.md) for the full security architecture (session auth, PII handling,
+rate limiting, server-side trust boundaries). The one rule worth repeating here since it's easy to
+violate by accident: **never commit anything under `scripts_and_data/` that isn't already
+gitignore-excluded by pattern** — check `.gitignore`'s `scripts_and_data/*.sql`, `*.csv`, `*.txt`,
+`*.py`, `*hash*`, and `scripts_and_data/backups/` rules before adding a new data-processing script
+or export there; if a new file type doesn't match an existing pattern, add the pattern rather than
+committing the file.
 
 ## Validation rules
 
@@ -146,16 +147,13 @@ subdirectory under `scripts_and_data/` the same way until it's covered by a patt
 
 ## Deployment & CI/CD
 
-- `pacrecovery.exciseup.in` is a Cloudflare Workers **Custom Domain** (`custom_domain: true` in
-  `api/wrangler.jsonc`'s `routes`, not a plain path-pattern route) — this auto-provisions its own
-  DNS record on `wrangler deploy`. A plain `{ pattern, zone_name }` route does **not** create DNS
-  and requires a record to already exist for the hostname to ever reach Cloudflare's edge — don't
-  switch to that form without adding the DNS record manually.
-- `.github/workflows/ci.yml` — `tsc --noEmit` + `next build` on every push/PR touching `api/`.
-- `.github/workflows/deploy.yml` — `pnpm run deploy` (OpenNext build + `wrangler deploy`) on push
-  to `main`. Requires `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` in GitHub Secrets.
-- Remote Wrangler secrets (not `wrangler.jsonc` vars): `JWT_SECRET`, `RESEND_API_KEY`,
-  `FRONTEND_URL`, `FROM_EMAIL`.
+See [DEPLOY.md](./DEPLOY.md) for the full production resource table, CI/CD wiring, and redeploy
+commands. The one wiring detail worth repeating here: `pacrecovery.exciseup.in` is a Cloudflare
+Workers **Custom Domain** (`custom_domain: true` in `api/wrangler.jsonc`'s `routes`, not a plain
+path-pattern route) — this auto-provisions its own DNS record on `wrangler deploy`. A plain
+`{ pattern, zone_name }` route does **not** create DNS and requires a record to already exist for
+the hostname to ever reach Cloudflare's edge — don't switch to that form without adding the DNS
+record manually.
 
 ## Known gaps / intentionally out of scope
 
