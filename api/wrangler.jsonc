@@ -1,0 +1,25 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"main": ".open-next/worker.js",
+	"name": "pac-recovery-portal",
+	"compatibility_date": "2026-06-01",
+	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+	// false from the start — no *.workers.dev grace period needed here, unlike the reference
+	// project's Milestone 35 (this repo never had a Pages custom domain to migrate off of, see
+	// pac-recovery-migration-plan.md §0).
+	"workers_dev": false,
+	"routes": [
+		{ "pattern": "pacrecovery.exciseup.in/*", "zone_name": "exciseup.in" }
+	],
+	"assets": {
+		"directory": ".open-next/assets",
+		"binding": "ASSETS"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "excise-bakaya-db",
+			"database_id": "667be1f3-7612-45c6-91e9-0a40a451c6ea"
+		}
+	]
+}

@@ -1,0 +1,18 @@
+# Cloudflare Pages custom headers (https://developers.cloudflare.com/pages/configuration/headers/).
+# next/og's static build output has no file extension (out/opengraph-image), so Pages' default
+# extension-based content-type detection would otherwise serve it as application/octet-stream —
+# link-preview scrapers (Slack, WhatsApp, Twitter/X) expect a real image content-type.
+/opengraph-image
+  Content-Type: image/png
+
+# Security response headers (see SECURITY.md), applied to every route. No Content-Security-Policy
+# here yet, deliberately — this app loads Tailwind/SweetAlert2/ExcelJS/Chart.js/Tabler Icons from
+# jsDelivr, Google Fonts, and runs a couple of inline <script>/<style> blocks with no nonce
+# infrastructure, so a CSP tight enough to matter would need real-browser verification first (see
+# SECURITY.md's open CSP recommendation) rather than shipping unverified against a live app.
+/*
+  X-Frame-Options: SAMEORIGIN
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains

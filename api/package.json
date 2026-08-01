@@ -1,11 +1,45 @@
 {
-  "name": "excise-bakaya-api",
+  "name": "pac-recovery-portal",
+  "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "cf-typegen": "wrangler types",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "for f in ./drizzle/[0-9]*.sql; do wrangler d1 execute excise-bakaya-db --local --file=\"$f\"; done",
+    "db:migrate:remote": "for f in ./drizzle/[0-9]*.sql; do wrangler d1 execute excise-bakaya-db --remote --file=\"$f\"; done",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@opennextjs/cloudflare": "^1.20.1",
+    "@tanstack/react-table": "^8.21.3",
+    "cleave.js": "^1.6.0",
+    "dexie": "^4.4.4",
+    "drizzle-orm": "^0.45.2",
+    "jose": "^6.2.3",
+    "next": "16.2.12",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "resend": "^6.16.0"
   },
   "devDependencies": {
-    "wrangler": "^3"
+    "@playwright/test": "^1.61.1",
+    "@types/cleave.js": "^1.4.12",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "chart.js": "^4.5.1",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
+    "exceljs": "^4.4.0",
+    "sweetalert2": "^11.6.13",
+    "typescript": "^5",
+    "wrangler": "^4.107.0"
   }
 }
