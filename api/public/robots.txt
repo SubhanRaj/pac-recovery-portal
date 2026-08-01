@@ -1,0 +1,14 @@
+# Every route below is a session-gated app screen (client-side auth check, no real content in
+# the static HTML shell before JS runs) — not worth a bot's time or this site's request budget.
+# Path-specific Disallow rules on purpose, not a blanket "Disallow: /": Cloudflare injects its
+# own "Allow: /" ahead of this file on this zone (see its managed AI-crawler block above this
+# one, left as-is — blocking GPTBot/ClaudeBot/etc. is desirable for a gov portal). Per Google's
+# robots.txt spec, an Allow and a Disallow of equal path length resolve in favor of Allow on a
+# tie, so a blanket "Disallow: /" here could lose that tie against Cloudflare's "Allow: /" for
+# compliant crawlers; a longer, path-specific Disallow always wins regardless.
+User-agent: *
+Disallow: /admin
+Disallow: /deo-data-entry
+Disallow: /verify
+Allow: /login
+Allow: /

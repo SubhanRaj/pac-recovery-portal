@@ -1,0 +1,59 @@
+/* Baseline styling so the page still looks intentional in the moment before the Tailwind
+   CDN script finishes generating utility classes (it's a runtime JIT, not a build step). */
+:root {
+  --background: #f8fafc;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--background);
+  font-family: "Noto Sans Devanagari", Inter, system-ui, sans-serif;
+  margin: 0;
+}
+
+/* No `color` here or on body above — this stylesheet isn't wrapped in a Tailwind @layer, so
+   per CSS Cascade Layers an unlayered rule always outranks Tailwind's own @layer-wrapped
+   utilities, specificity and the .dark toggle notwithstanding. A `color` declaration here
+   would permanently pin every button/input/select's text to this file's static value —
+   which happened to match Tailwind's light-mode text-slate-900 by coincidence (so it went
+   unnoticed), but silently defeated every dark:text-* class app-wide, rendering dark-on-dark
+   invisible text on every button/input once dark mode was on. Tailwind is a blocking script
+   that loads near-instantly, so leave color entirely to its utility classes. */
+input,
+select,
+button {
+  font: inherit;
+  /* Tabler's icon webfont CSS hardcodes `line-height: 1` on every `.ti` icon glyph. Without
+     this, `font: inherit` above pulls in the page's line-height (1.5, from Tailwind's
+     preflight on html/body) for the button's own text — so an icon+label pair inside one
+     flex row sit in two differently-sized line boxes and `items-center` centers each within
+     its own box, not relative to each other. That's what actually produced the repeated
+     "icon low / text high, gap under the text" look — not a flex/alignment bug. Matching
+     line-height here to the icon's fixes both at once. */
+  line-height: 1;
+}
+
+/* Wrapped in @layer base (unlike the rules above) specifically so components' own Tailwind
+   padding utility classes (py-1.5, px-3, etc) can still override this fallback padding/border —
+   same cascade-layers reasoning as the `color` note above: an unlayered rule permanently
+   outranks every @layer-wrapped Tailwind utility for the same property, no matter the class
+   list or specificity. This was a real bug: components/ui/Select.tsx's `size` prop sets a
+   vertical padding utility via className, but this bare rule's padding: 0.5rem 0.75rem silently
+   won every time regardless of which value Select.tsx used — bumping that value repeatedly had
+   no visible effect at all, since the unlayered fallback never actually lost the cascade. */
+@layer base {
+  input,
+  select {
+    border: 1px solid #cbd5e1;
+    border-radius: 0.375rem;
+    padding: 0.5rem 0.75rem;
+  }
+}
+
+button {
+  cursor: pointer;
+}

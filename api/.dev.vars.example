@@ -1,0 +1,7 @@
+JWT_SECRET=replace-with-a-long-random-string
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+FRONTEND_URL=http://localhost:3000
+# mail.exciseup.in is verified in Resend (shared with the sibling
+# up-excise-spatial-revenue-optimizer project's RESEND_FROM_EMAIL, same Resend account).
+# Optional — falls back to Resend's shared sandbox sender (onboarding@resend.dev) if unset.
+FROM_EMAIL=noreply@mail.exciseup.in
