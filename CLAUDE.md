@@ -1,181 +1,188 @@
-# CLAUDE.md — UP Excise Bakaya Tracker
+# CLAUDE.md — PAC Recovery Portal
 
 Instructions for AI agents working in this repo. [.agents/AGENTS.md](./.agents/AGENTS.md) has the
 core directives (stack limits, no new frameworks without permission, no schema/math changes
 without instruction) — read that too. See [README.md](./README.md) for what the system does and
-[v2plan.md](./v2plan.md) for the v2 change history. This file documents rules to preserve, not a
-build log.
+[pac-recovery-migration-plan.md](./pac-recovery-migration-plan.md) for the full migration
+reasoning (identity/naming, schema translation, D1 safety guarantees, what's dropped from the
+reference project's feature set). [v2plan.md](./v2plan.md) is pre-migration history — the old
+single-snapshot system this repo used to be, kept for context, not a to-do list. This file
+documents rules to preserve, not a build log.
 
 ## What this is
 
-Government portal (Excise Dept., Uttar Pradesh) for 59 District Excise Officers (DEOs) to submit
-one round of dues-recovery figures, and for an Admin to review/export/unlock it. One submission
-per district is final: once a DEO locks, it cannot be re-edited without an Admin unlock. Built as
-a fast, no-build-step static site + a single Worker file — not a framework app. Keep changes in
-that spirit: the smallest diff that works, not a rewrite toward more structure.
+Government portal (Excise Dept., Uttar Pradesh) tracking recovery of dues from cases originating
+up to FY ending 31-Mar-2019, across 75 districts. District Excise Officers (DEOs) submit recovery
+figures every month; an Admin reviews, exports, and can unlock a district's period for re-entry.
+Migrated from **UP Excise Bakaya Tracker** — a static-HTML + Cloudflare Pages + hand-rolled Worker
+app tracking one lifetime snapshot per district — into **PAC Recovery Portal**, a single Next.js
+app on `@opennextjs/cloudflare`, mirroring the sibling `excise-revenue-recovery-portal` project's
+architecture (Drizzle/D1, HttpOnly cookie sessions, magic-link admin auth). Keep changes in the
+spirit both projects share: the smallest diff that works, matching the reference project's
+conventions rather than inventing new ones.
 
 ## Repo shape
 
-`/frontend` (static HTML files, Cloudflare Pages) and `/api`
-(one `worker.js`, Cloudflare Workers + D1) are separate origins in production
-(`excise-bakaya-form.pages.dev` / `excise-bakaya-api.shubhanraj2002.workers.dev`). Auto-deployed
-via GitHub Actions (`deploy.yml`) on pushing to the `main` branch. No shared
-package, no bundler on either side — `worker.js` is deployed as-is by `wrangler deploy`, HTML
-files load every dependency from a CDN `<script>` tag.
+The whole app — UI pages *and* `/api/*` route handlers — lives under `api/` (one Next.js Worker,
+deployed via `@opennextjs/cloudflare`). The directory is still called `api` for historical
+reasons: it used to hold just the backend Worker before this migration, and the name stuck rather
+than being renamed, same as the reference project's own `api/` directory. Don't be surprised that
+`api/app/deo-data-entry/page.tsx` is a UI page, not an API route — everything under `api/app/api/`
+is the actual API surface; everything else under `api/app/` is a page.
+
+No `frontend/` Pages deployment anymore — the old `excise-bakaya-form`/`excise-bakaya-api`
+two-deployment setup is untouched but retired-in-spirit; the `frontend/` directory and its Pages
+project get torn down once the new portal is confirmed stable in production (not yet done as of
+this writing — see the migration plan §6 Q3).
 
 **Never run a destructive Wrangler D1 command with `--remote`, and never `wrangler deploy`/push to
 `main`, without the user explicitly saying so for that specific change.** Local `--local` D1 work
-and local testing (`wrangler dev`) don't need to ask. This project has live production data and
+and local testing (`pnpm run preview`) don't need to ask. This project has live production data and
 real government users; the user has been explicit and repeated about this boundary — treat every
 remote/deploy action as requiring a fresh go-ahead, not a standing one from a past turn.
 
 ## Data model
 
-See [README.md](./README.md)'s Database Schema section for the full column reference. Rules to
-preserve:
+See [README.md](./README.md)'s Data model section and `api/db/schema.ts` (inline comments there
+are the authoritative reasoning) for the full column reference. Rules to preserve:
 
-- **District names are current official names**, not the source Excel's literal strings:
-  `Prayagraj` (not `Allahabad`), `Lakhimpur Kheri` (not `Kheri`). The Excel report and the
-  department's Hindi contact directory don't agree on these — the contact directory (and reality)
-  wins. If a future data refresh reintroduces an old name, rename it, don't re-add a duplicate row.
-- `total_dues` and `collected_till_date` are read-only, sourced from the department's periodic
-  Excel exports (`scripts_and_data/*.xlsx`) — never computed or DEO-editable.
-  `collected_till_date` currently means "collected as of 08-Jul-2026" (the PAC meeting baseline);
-  if a future re-baseline moves this date, re-seed the column's value and relabel the UI ("3. ...
-  तक वसूल की गई धनराशि") rather than adding a new column — this project reuses columns across
-  baselines by design (see v2plan.md §1).
-- `court_case_count`/`court_stayed_amount` mirrors `batte_khatte_count`/`batte_khatte_amount`
-  exactly (same UI layout, same DEO-input treatment) — keep them structurally identical if you add
-  a third such pair.
-- **`Demo District`** is a real row (not a special-cased id), used only for pre-launch end-to-end
-  testing. `/truncate-demo` is hardcoded server-side to
-  `WHERE district_name = 'Demo District'` — never parameterize this route, the whole point is that
-  it's physically incapable of deleting a real district even given a bad request body.
-- **Data-entry scope**: only dues from cases originating up to FY ending 31-Mar-2019 are meant to
-  be tracked here. This is a static bilingual disclaimer banner near the district selector, not a
-  live date check — dues can predate the 1970s, so don't add logic that rejects entries based on
-  today's date.
+- **District names are current official names** (`Prayagraj` not `Allahabad`, `Lakhimpur Kheri`
+  not `Kheri`) — carried over unchanged from the pre-migration `excise_dues` table.
+- `districts.totalDues`/`collectedTillDate` are the one-time, department-sourced, read-only
+  baseline for cases originating up to FY ending 31-Mar-2019 — never computed or DEO-editable,
+  never re-entered per period. `NULL` for districts the department hasn't yet supplied figures
+  for (16 of the 75, as of the migration).
+- **Lock state is per `(district, period)` on `pac_dues`, not district-lifetime.** This is the one
+  structural difference from both the pre-migration version (one submission ever) and the
+  reference project (`districts.lockStatus`, one atomic 5-FY submit) — a district here can have
+  many `pac_dues` rows over time, each independently locked/unlocked. Any new route touching lock
+  state must take a `period`, never assume "the" lock state for a district.
+- **`pac_dues.openingBalance`/`netRecoverable` are computed server-side only**, never trusted from
+  the client — `openingBalance` chains from the previous period's `netRecoverable` (or
+  `totalDues − collectedTillDate` for a district's first period). See `lib/dues-fields.ts`'s
+  `computeNetRecoverable()`.
+- No "Open Next Period" mechanic exists yet (provisionally decided as an explicit admin action,
+  not a cron trigger — see migration plan §3, flagged as revisit-once-real-usage-is-known, not a
+  final call). Building it is real, undone work, not a documentation gap.
+- **`Demo District`** is a real row (migrated from `excise_dues` like any other), used only for
+  pre-launch end-to-end testing. `/api/admin/truncate-demo-data` is hardcoded server-side to
+  `district_name = 'Demo District'` — never parameterize this route, the whole point is that it's
+  physically incapable of deleting a real district even given a bad request body.
+- **Data-entry scope**: only dues from cases originating up to FY ending 31-Mar-2019 are tracked
+  here — a static bilingual disclaimer banner on the DEO data-entry page, not a live date check
+  (dues can predate the 1970s). Recovery *entries* happen in real time, monthly; the underlying
+  dues stock itself never grows — don't build anything that lets a DEO or admin add new dues.
 
 ## Auth
 
 See [README.md](./README.md)'s DEO Flow / Admin Flow / API sections for the request-level
 overview. Rules to preserve:
 
-- **`X-API-Secret` is not a real per-user credential and never will be** — it's embedded in every
-  frontend HTML file's source (unavoidable: this is a static site with no server-side templating),
-  so anyone can read it from view-source. Treat it only as a coarse bot/scraper filter. **Never
-  design a security boundary that assumes `X-API-Secret` alone proves anything about who the
-  caller is.**
-- **The real per-district write boundary is the `deo_session` cookie**, set by `/verify-deo` on a
-  successful CUG hash match: an HMAC-SHA256-signed, district-bound, 24-hour token (hand-rolled via
-  `crypto.subtle`, not a JWT library — see the "Minimal HMAC-signed session token" comment in
-  `worker.js`). `POST /` verifies this cookie and 403s if its `districtId` doesn't match
-  `body.id`, even with a valid `X-API-Secret`. If you add another DEO-write route, it must perform
-  this same check — don't let a new route trust `body.id`/`body.district_id` on its own.
-- **`JWT_SECRET`** (Wrangler secret) signs that cookie, and the admin one below (`signToken`/
-  `verifyToken` are the shared generic helpers; `signDeoToken`/`signAdminToken` just fix the
-  payload shape). **`FRONTEND_URL`** (plain var in `wrangler.toml`) is the CORS allowlist —
-  `Access-Control-Allow-Origin` is only ever set to an exact match against it, never a wildcard,
-  because both cookies require `Access-Control-Allow-Credentials: true` and the fetch spec
-  forbids combining that with `*`. Every frontend fetch that needs a cookie sent must pass
-  `credentials: 'include'` (`login.html`'s `/verify-deo` call; `index.html`'s `POST /` and
-  `/deo-logout`; `admin-login.html`'s `/auth`; `admin.html`'s `/unlock`, `/truncate-demo`,
-  `/admin-logout`) — a route added without this will silently fail to receive/send the cookie.
-- **Admin auth is a separate system from the DEO session** (`ADMIN_PIN` Wrangler secret, `/auth`
-  route) — an Admin and a DEO can be logged in in the same browser simultaneously, entirely
-  separate login pages (`admin-login.html` vs. `login.html`), no shared session. It is **not**
-  PIN-only, though: `/auth` on success also signs an `admin_session` cookie (role-only payload, no
-  district), and `/unlock`/`/truncate-demo` require it (403 without it) — `isAdminSession()` in
-  `worker.js`. `sessionStorage`'s `admin_auth` flag is a client-side UI convenience only (skip
-  `admin-login.html` if already set this tab); it proves nothing to the server. If you add another
-  admin-only write route, it must call `isAdminSession()` too — don't let a new admin route trust
-  `X-API-Secret` alone, same rule as the DEO side. `/auth` also throttles PIN attempts specifically
-  (10 per 15 min per IP, separate from the general rate limiter) since a 4-digit PIN is only 10,000
-  combinations.
-- **Known open risk** (same class of issue as `excise-revenue-recovery-portal`, a sibling project
-  with an identical cross-origin cookie setup): `SameSite=None` cross-site cookies between two
-  different public-suffix domains (`pages.dev`, `workers.dev`) are exactly what Safari ITP and
-  Chrome's third-party-cookie deprecation target. If a DEO reports "verify succeeds but every save
-  gets 403," check whether their browser is silently dropping the cookie before assuming the token
-  logic is broken. All four `Set-Cookie` headers in `worker.js` carry the `Partitioned` attribute
-  (CHIPS) as a mitigation — this keeps the cookie alive under Chrome's third-party-cookie
-  deprecation, but does **not** help Safari, which blocks third-party cookies outright regardless
-  of `Partitioned`/`SameSite`. The only full fix is moving frontend and API onto the same
-  registrable domain (e.g. a custom domain with `app.` / `api.` subdomains) so the cookie becomes
-  first-party — out of scope until this project has a custom domain.
-- `GET /` and the admin-only routes (`/auth`, `/unlock`, `/truncate-demo`) are intentionally
-  **not** gated by the DEO session cookie — `GET /` is used pre-login to populate the district
-  dropdown and by the Admin dashboard (which has no DEO session at all). Don't add a cookie
-  requirement to `GET /`.
+- **Session is an HttpOnly/Secure/SameSite=Lax cookie** (`__deo_session`/`__admin_session`,
+  `lib/session.ts`, signed via `jose`), not a shared-secret header — UI and API are a true single
+  origin now, so there's no `X-API-Secret`-style coarse filter and no CORS handling needed
+  (`middleware.ts` is a documented no-op, kept only because the filename is load-bearing under
+  this Next.js version).
+- **DEO login** (`/api/auth/verify-cug`) is CUG-hash verification — the 10-digit CUG mobile number
+  is SHA-256-hashed client-side (`lib/crypto.ts`) before it ever leaves the browser; the server
+  only ever sees and stores the hash (`users.cugHash`).
+- **Admin login is magic-link email** (`/api/auth/request-magic-link` → Resend →
+  `/api/auth/verify-magic-link`), not a PIN — a real behavior change from the pre-migration
+  system, decided per the migration plan §6.1. `RESEND_API_KEY`/`FROM_EMAIL`/`FRONTEND_URL` are
+  Wrangler secrets, not `wrangler.jsonc` vars.
+- `requireSession(req, role)` (`lib/auth-guard.ts`) is the one place session verification happens
+  — any new route touching DEO or admin data must call it, exactly like every existing route does.
+  Don't let a new route trust `body.districtId`/`body.id` on its own.
+- **No `isOwner`/`OWNER_EMAIL` concept** — the reference project's owner-gated multi-admin
+  `/admin/users` and bulk DEO provisioning are out of scope for this version (migration plan
+  §6.2). Every admin session has equal privileges.
+- Rate limiting: `checkIpRateLimit()` (`lib/rate-limit.ts`, D1-backed `login_attempts` table) on
+  CUG verify; a separate per-user check inside `request-magic-link`'s own route (keyed by
+  `magicLinkTokens`, not IP) so a magic-link flood can't also block every admin's real login.
 
 ## Security
 
 `scripts_and_data/contact.csv` (the department's real officer names + CUG mobile numbers) was
-committed to this public repo before `.gitignore` excluded `*.csv`/`*.txt`/`*.py` under that
+committed to this repo's history before `.gitignore` excluded `*.csv`/`*.txt`/`*.py` under that
 directory. It was untracked and scrubbed from git history with `git-filter-repo` + force-push.
 **Never commit anything under `scripts_and_data/` that isn't already gitignore-excluded by
-pattern** — check `.gitignore`'s `scripts_and_data/*.sql`, `*.csv`, `*.txt`, `*.py`, `*hash*`
-rules before adding a new data-processing script or export there; if a new file type doesn't match
-an existing pattern, add the pattern rather than committing the file. The demo CUG number
-(`DEMO_CUG_HASH`'s preimage) follows the same rule — it's exempted by hash specifically so the raw
-value never needs to appear in source; don't add it to a doc, comment, or commit message.
+pattern** — check `.gitignore`'s `scripts_and_data/*.sql`, `*.csv`, `*.txt`, `*.py`, `*hash*`, and
+`scripts_and_data/backups/` rules before adding a new data-processing script or export there; if a
+new file type doesn't match an existing pattern, add the pattern rather than committing the file.
+The `scripts_and_data/backups/` rule specifically closes a gap found during this migration: D1
+export backups taken there (real `cug_hash`/`deo_email` values) weren't actually covered by the
+pre-existing `scripts_and_data/*.sql` pattern, since gitignore globs don't cross a `/` boundary —
+the same class of leak as the CSV incident, caught before it happened this time.
 
 ## Validation rules
 
-1. **Anti-blank rule**: DEO-input fields (`collected_after_date`, both count/amount pairs) start
-   **blank** on district select, never pre-filled with `0` — an explicit `0` must be typed
-   deliberately. Submitting with any of these still blank is blocked by a SweetAlert2 toast
-   (`notifyToast()` in `index.html`), not a native HTML5 `required` popup (removed on purpose —
-   see the field `<input>` tags, none carry `required`) and not silently coerced to `0`. If you add
-   a new DEO-input field, default it to `''`/blank and add it to the blank-check list in the
-   `duesForm` submit handler.
-2. **DEO name** (`validateDeoName()`, both `index.html` and `login.html`'s equivalent checks where
-   relevant): rejects blank, digits (guards against a pasted CUG number), designation words
-   ("DEO"/"officer"/"admin" etc. via whole-word regex), and non-letter characters.
-3. **Math-safety submit gate**: the "Verify & Lock Record" button is disabled if
-   `batte_khatte_amount > Total Dues Left` or
-   `court_stayed_amount > (Total Dues Left − batte_khatte_amount)` — see README's Calculation
-   Logic. Mirror this in any new deduction-style field pair.
-4. **Two-step lock confirm**: a plain "are you sure" dialog, then the name-entry + liability-
-   disclaimer prompt (bilingual, mirrors `excise-revenue-recovery-portal`'s
-   `confirmFinalSubmit`/`promptDeoNameAndLock`). Don't collapse this back to one dialog — the
-   split is deliberate (matches the reference project, gives a DEO a genuine second chance to
-   cancel before the irreversible name-entry step).
+1. **Anti-blank rule**: DEO-input fields (`recoveredThisPeriod`, both count/amount pairs) start
+   **blank**, never pre-filled with `0` — an explicit `0` must be typed deliberately. Submitting
+   with any of these still blank is blocked by a SweetAlert2 toast (`notifyToast()` in
+   `lib/alerts.ts`), never silently coerced to `0`. If you add a new DEO-input field, default it
+   to `""`/blank and add it to the blank-check list in `app/deo-data-entry/page.tsx`'s
+   `submitAll()`.
+2. **DEO name** (`validateDeoName()` in `lib/alerts.ts`): rejects blank, digits (guards against a
+   pasted CUG number), designation words ("DEO"/"officer"/"admin" etc. via whole-word regex), and
+   non-letter characters.
+3. **Math-safety submit gate**, enforced server-side (`app/api/pac-dues/submit/route.ts`) — the
+   client-side preview mirrors it but the server never trusts it: rejects if
+   `batteKhatteAmount > Total Dues Left` or
+   `courtStayedAmount > (Total Dues Left − batteKhatteAmount)` — see README's Calculation Logic.
+   Mirror this in any new deduction-style field pair.
+4. **Two-step lock confirm**: a plain "are you sure" dialog (`confirmFinalSubmit()`), then the
+   name-entry + liability-disclaimer prompt (`promptDeoNameAndLock()`) — both in `lib/alerts.ts`.
+   Don't collapse this back to one dialog — the split is deliberate (matches both the reference
+   project and the pre-migration version, gives a DEO a genuine second chance to cancel before the
+   irreversible name-entry step).
 
 ## UI conventions
 
-- **Language**: bilingual Hindi/English throughout the DEO-facing UI (labels, disclaimers,
-  confirms) — this mirrors the actual government form, unlike `excise-revenue-recovery-portal`
-  (English-only UI chrome). Don't strip Hindi from DEO-facing strings.
-- **Feedback split**: field-level/login errors render **inline** (a red banner under the field —
-  see `login.html`'s and `admin-login.html`'s `#loginError`), not as a popup. Multi-field or
-  non-field-specific validation errors (e.g. "some field is blank, could be any of five") use a
-  SweetAlert2 **toast** (`notifyToast()`). SweetAlert2 **modals** (`Swal.fire` without
-  `toast: true`) are reserved for blocking confirms before an irreversible action — locking a
-  record, admin unlock, truncate-demo, logout. Don't add a new blocking modal for a routine
-  validation message; don't add a new inline banner for an irreversible-action confirm.
+- **Language**: bilingual Hindi/English in the DEO-facing form (`app/deo-data-entry/page.tsx`) —
+  this mirrors the actual government form. Admin-facing UI chrome stays English-only, matching the
+  reference project's convention. Don't strip Hindi from DEO-facing field labels.
+- The DEO-facing Hindi field labels in `lib/dues-fields.ts` are a **draft**, not confirmed
+  government-form language, as of this migration — the pre-migration form's "8-Jul-26 तक/उपरांत"
+  (PAC-meeting-date) framing doesn't translate cleanly to a recurring monthly period. Get a
+  native-speaker/domain-expert pass before treating this copy as final.
+- **Feedback split**: field-level errors render inline; multi-field/non-field-specific validation
+  errors use a SweetAlert2 **toast** (`notifyToast()`); blocking confirms before an irreversible
+  action (lock, admin unlock, truncate-demo, logout) use a SweetAlert2 **modal**. Don't add a new
+  blocking modal for a routine validation message; don't add a new inline banner for an
+  irreversible-action confirm.
 - **No emojis anywhere in the UI** — Tabler Icons (webfont) only.
-- **₹ prefix** on every financial amount, Indian Lakh/Crore grouping via Cleave.js on DEO-input
-  money fields — don't hand-roll number formatting.
-- **Excel export uses ExcelJS, not a SheetJS-family library.** `xlsx`/`xlsx-js-style`'s community
-  core silently drops frozen-pane and print-layout XML — confirmed both here and in
-  `excise-revenue-recovery-portal` by inspecting the actual output file. If you touch
-  `exportToExcel()` in `admin.html`, verify any `!views`/page-setup-equivalent change with a real
-  unzip-and-grep of the generated `.xlsx` (`<pane .../>`, `<pageSetup .../>` in
-  `xl/worksheets/sheet1.xml`), not just "no error thrown" — a silently no-op call is the exact bug
-  this was fixed for.
+- **₹ prefix** on every financial amount, Indian Lakh/Crore grouping via Cleave.js
+  (`components/PacFieldInput.tsx`) on DEO-input money fields — don't hand-roll number formatting.
+- **Excel export uses ExcelJS, not a SheetJS-family library** (`lib/export.ts`) — `xlsx`/
+  `xlsx-js-style`'s community core silently drops frozen-pane and print-layout XML, confirmed both
+  here and in `excise-revenue-recovery-portal` by inspecting the actual output file. If you touch
+  `exportDistrictsToXlsx()`, verify any page-setup/frozen-pane change with a real unzip-and-grep of
+  the generated `.xlsx` (`<pane .../>`, `<pageSetup .../>` in `xl/worksheets/sheet1.xml`), not
+  just "no error thrown."
 - Destructive/irreversible admin actions (unlock, truncate-demo) use a red (`#dc2626`) confirm
   button and Hindi cancel text, matching the DEO-side lock/logout dialogs.
+
 ## Deployment & CI/CD
 
-- Deploys are handled automatically via GitHub Actions:
-  - Pushing to `main` triggers `.github/workflows/deploy.yml` which deploys both the API and the frontend.
-  - Requires `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in GitHub Secrets.
-  - Manual triggers are available in the GitHub Actions tab.
-- CI tests (`.github/workflows/ci.yml`) run syntax validation on `worker.js` and verify frontend files exist on pushes and PRs to `main`.
+- `pacrecovery.exciseup.in` is a Cloudflare Workers **Custom Domain** (`custom_domain: true` in
+  `api/wrangler.jsonc`'s `routes`, not a plain path-pattern route) — this auto-provisions its own
+  DNS record on `wrangler deploy`, matching the sibling `up-excise-spatial-revenue-optimizer`
+  project's `sro.exciseup.in` wiring. A plain `{ pattern, zone_name }` route does **not** create
+  DNS and requires a record to already exist for the hostname to ever reach Cloudflare's edge —
+  don't switch back to that form without re-adding the DNS record manually.
+- `.github/workflows/ci.yml` — `tsc --noEmit` + `next build` on every push/PR touching `api/`.
+- `.github/workflows/deploy.yml` — `pnpm run deploy` (OpenNext build + `wrangler deploy`) on push
+  to `main`. Requires `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` in GitHub Secrets.
+- Remote Wrangler secrets (not `wrangler.jsonc` vars): `JWT_SECRET`, `RESEND_API_KEY`,
+  `FRONTEND_URL`, `FROM_EMAIL`.
 
 ## Known gaps / intentionally out of scope
 
 - Git history was scrubbed once (see Security above); it is not scrubbed automatically going
   forward — a future accidental commit of a gitignored-pattern-violating file still needs the same
   manual `git-filter-repo` + force-push treatment, this repo has no pre-commit hook preventing it.
+- Multi-admin `/admin/users`, bulk DEO provisioning, and a district-detail drill-in beyond the
+  per-period table are all out of scope for this version — see migration plan §6.2/§6.5. Easy to
+  add later if the portal grows past one admin/59-district seeding.
+- The old `excise-bakaya-form`/`excise-bakaya-api` deployment is still live, untouched, pending
+  retirement once the new portal is confirmed stable in production (migration plan §6 Q3).
