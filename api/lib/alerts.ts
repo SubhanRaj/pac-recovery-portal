@@ -157,76 +157,11 @@ export async function confirmUnlockRequest(): Promise<boolean> {
   return result.isConfirmed;
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-// Multi-field SweetAlert2 form (no dedicated Modal component in this codebase — see
-// components/ui/, only ProfileMenu's own inline dropdown) for adding an admin. English-only:
-// admin UI chrome stays English-only per CLAUDE.md, unlike the DEO-facing bilingual form.
-export async function promptAddAdmin(): Promise<{ name: string; email: string; designation: string } | null> {
-  const result = await window.Swal.fire({
-    title: "Add Admin",
-    html:
-      '<input id="swal-admin-name" class="swal2-input" placeholder="Full Name">' +
-      '<input id="swal-admin-email" class="swal2-input" placeholder="Email Address" type="email">' +
-      '<input id="swal-admin-designation" class="swal2-input" placeholder="Designation (optional)">',
-    focusConfirm: false,
-    showCancelButton: true,
-    confirmButtonText: "Add Admin",
-    cancelButtonText: "Cancel",
-    confirmButtonColor: "#1d4ed8",
-    preConfirm: () => {
-      const name = (document.getElementById("swal-admin-name") as HTMLInputElement)?.value.trim() ?? "";
-      const email = (document.getElementById("swal-admin-email") as HTMLInputElement)?.value.trim() ?? "";
-      const designation = (document.getElementById("swal-admin-designation") as HTMLInputElement)?.value.trim() ?? "";
-      if (!name) {
-        window.Swal.showValidationMessage("Please enter a name.");
-        return false;
-      }
-      if (!EMAIL_RE.test(email)) {
-        window.Swal.showValidationMessage("Please enter a valid email address.");
-        return false;
-      }
-      return { name, email, designation };
-    },
-  });
-  return result.isConfirmed ? (result.value as { name: string; email: string; designation: string }) : null;
-}
-
-// Same field set as promptAddAdmin, pre-filled — used from the Edit action on /admin/users.
-export async function promptEditAdmin(existing: {
-  name: string;
-  email: string;
-  designation: string;
-}): Promise<{ name: string; email: string; designation: string } | null> {
-  const result = await window.Swal.fire({
-    title: "Edit Admin",
-    html:
-      `<input id="swal-admin-name" class="swal2-input" placeholder="Full Name" value="${existing.name.replace(/"/g, "&quot;")}">` +
-      `<input id="swal-admin-email" class="swal2-input" placeholder="Email Address" type="email" value="${existing.email.replace(/"/g, "&quot;")}">` +
-      `<input id="swal-admin-designation" class="swal2-input" placeholder="Designation (optional)" value="${existing.designation.replace(/"/g, "&quot;")}">`,
-    focusConfirm: false,
-    showCancelButton: true,
-    confirmButtonText: "Save Changes",
-    cancelButtonText: "Cancel",
-    confirmButtonColor: "#1d4ed8",
-    preConfirm: () => {
-      const name = (document.getElementById("swal-admin-name") as HTMLInputElement)?.value.trim() ?? "";
-      const email = (document.getElementById("swal-admin-email") as HTMLInputElement)?.value.trim() ?? "";
-      const designation = (document.getElementById("swal-admin-designation") as HTMLInputElement)?.value.trim() ?? "";
-      if (!name) {
-        window.Swal.showValidationMessage("Please enter a name.");
-        return false;
-      }
-      if (!EMAIL_RE.test(email)) {
-        window.Swal.showValidationMessage("Please enter a valid email address.");
-        return false;
-      }
-      return { name, email, designation };
-    },
-  });
-  return result.isConfirmed ? (result.value as { name: string; email: string; designation: string }) : null;
-}
-
+// Same "blocking confirm before an irreversible/session-ending action" pattern as
+// confirmClearForm()/confirmUnlockRequest() above — add/edit go through AdminUserDrawer instead
+// (ported from the sibling excise-revenue-recovery-portal), a routine form action, not a
+// SweetAlert2 popup, per CLAUDE.md's "don't add a new blocking modal for a routine validation
+// message" UI convention. Delete is the one irreversible step here, so it stays a Swal confirm.
 export async function confirmDeleteAdmin(name: string): Promise<boolean> {
   const result = await window.Swal.fire({
     icon: "warning",

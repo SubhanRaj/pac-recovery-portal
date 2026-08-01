@@ -31,9 +31,9 @@ const EVENT_LABELS: Record<string, string> = {
   unlock_requested: "Unlock requested (DEO)",
   unlock_request_approved: "Unlock request approved",
   unlock_request_denied: "Unlock request denied",
-  admin_user_added: "Admin added",
+  admin_user_created: "Admin added",
   admin_user_updated: "Admin updated",
-  admin_user_removed: "Admin removed",
+  admin_user_deleted: "Admin removed",
 };
 
 // Raw metadata JSON keys, as actually written across every `auditLog` insert in api/app/api/**
@@ -47,12 +47,12 @@ const METADATA_KEY_LABELS: Record<string, string> = {
   updated: "Updated",
   errors: "Errors",
   totalRows: "Total rows",
-  addedEmail: "Added email",
-  addedName: "Added name",
-  updatedEmail: "Updated email",
-  updatedName: "Updated name",
-  removedEmail: "Removed email",
-  removedName: "Removed name",
+  newAdminEmail: "New admin email",
+  newAdminName: "New admin name",
+  targetAdminId: "Admin ID",
+  targetAdminEmail: "Admin email",
+  deletedAdminEmail: "Deleted admin email",
+  deletedAdminName: "Deleted admin name",
 };
 
 // Name/designation are captured at write time (see api/lib/audit.ts) — an admin's later name
