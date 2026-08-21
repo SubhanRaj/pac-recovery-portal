@@ -37,7 +37,7 @@ Test 4 sends a real magic-link email via Resend and reads production D1 — only
 deliberately, not as a quick local sanity check. Tests 1–3 are safe to run locally against
 `pnpm run preview` any time.
 
-Not wired into CI yet — `ci.yml` only runs `tsc --noEmit` + `next build`.
+Not automated — there is no CI, run these manually when touching auth.
 
 ## Manual smoke test
 
@@ -81,4 +81,4 @@ pnpm exec tsc --noEmit
 pnpm run build
 ```
 
-Both run in CI (`.github/workflows/ci.yml`) on every push/PR touching `api/`.
+There is no CI — run both by hand before pushing/deploying.

@@ -5,9 +5,10 @@ database. This doc is the source of truth for current production state and the e
 redeploy or rebuild from scratch. See [CLAUDE.md](./CLAUDE.md) for how the system itself works
 and [SECURITY.md](./SECURITY.md) for the security architecture.
 
-**Never run a destructive Wrangler D1 command with `--remote`, `wrangler deploy`, or push to
-`main` (which triggers `deploy.yml`) without the user explicitly saying so for that specific
-change.** This project has live production data and real government users.
+**Never run a destructive Wrangler D1 command with `--remote` or `wrangler deploy` without the
+user explicitly saying so for that specific change.** This project has live production data and
+real government users. There is no CI/CD — deploys are manual, run from this machine only (see
+CI/CD section below).
 
 ## Current production deployment
 
@@ -22,41 +23,22 @@ change.** This project has live production data and real government users.
 Auth to Cloudflare: `pnpm exec wrangler whoami` (already logged in via OAuth on this machine).
 Re-auth elsewhere with `pnpm exec wrangler login`.
 
-### Pre-filled recovery figures (test data, pre-dates the ledger redesign)
+### District baseline (`districts.total_dues`/`collected_till_date`)
 
-The 59 districts that had a prior bakaya form period carry real recovery figures
-(`recovered_this_period`, `batte_khatte_*`, `court_stayed_amount`, `net_recoverable`) pulled from
-that old system's own report export — the source file is
-`scripts_and_data/Excise_Bakaya_Report_02-07-2026_12-39-31.xlsx`, backed up alongside a pre-import
-D1 snapshot in `scripts_and_data/backups/`. **Caution**: these rows were inserted with
-`submitted_by_name = NULL` and were meant to be reviewed and re-submitted by a real DEO before
-counting as genuine (see the old `lockStatus` model this repo used to have) — but
-[PLAN.md](./PLAN.md)'s append-only ledger redesign removed that "unconfirmed draft" concept
-entirely, so as of that change these 59 rows now sit in each district's ledger indistinguishable
-from a real DEO submission (just with a blank Submitted By). Flagged, not yet resolved — decide
-whether to clear them (via `POST /api/admin/reset-district`, per district) before a real DEO
-starts submitting against one of these 59, or accept them as the starting entry. The real Excel
-re-baseline (`districts.totalDues`/`collectedTillDate`, up to 31-Mar-2019) supersedes the
-pre-filled figures either way once it's imported.
+60 of the 75 districts carry a real baseline, imported from
+`scripts_and_data/District_Bakaya_upto_FY2018-19.xlsx` (dues through FY ending 31-Mar-2019 only;
+Allahabad sheet data maps to the `Prayagraj` district row). The remaining 15 districts are `NULL`
+until the department supplies figures. The old 59 pre-filled `pac_dues` rows (test data carried
+over from the prior system, all with `submitted_by_name = NULL`) have been deleted — `pac_dues` is
+empty in production as of this import, so every district's ledger now starts clean from the
+Excel-sourced baseline on a DEO's first real submission.
 
 ## CI/CD
 
-- `.github/workflows/ci.yml` — `pnpm exec tsc --noEmit` + `pnpm run build` on every push/PR
-  touching `api/`.
-- `.github/workflows/deploy.yml` — `pnpm run deploy` (OpenNext build + `wrangler deploy`) on push
-  to `main` when `api/**` changed, or via `workflow_dispatch`. Requires
-  `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` in GitHub Secrets.
-
-**`deploy.yml` is currently broken and failing on every push** — the repo was renamed, and the
-`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` GitHub Secrets need to be re-added under the new
-repo name before it'll run again. Until that's done, deploys are manual only — run
-`pnpm run deploy` from `api/` yourself after pushing, don't assume a push to `main` actually
-reached production. `ci.yml` (typecheck/build) is unaffected and still runs normally.
-
-```bash
-gh workflow run deploy.yml
-gh run watch <run-id> --exit-status           # follow it live
-```
+There is no GitHub Actions workflow — deploys are manual only, run from this machine. A push to
+`main` does **not** reach production by itself; typecheck/build (`pnpm exec tsc --noEmit &&
+pnpm run build`) and `pnpm run deploy` (OpenNext build + `wrangler deploy`) must both be run by
+hand from `api/` after pushing.
 
 ## One-time setup (already done — for reference / disaster recovery)
 

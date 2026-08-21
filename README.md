@@ -239,10 +239,10 @@ pnpm run preview                 # closer to production: builds via OpenNext, re
 ## Deploying
 
 Live at `https://pacrecovery.exciseup.in` as a single Cloudflare Worker + D1. **Never run
-`wrangler deploy`, a `--remote` D1 command, or push to `main` (which triggers `deploy.yml`)
-without the user explicitly saying so for that specific change** — this project has live
-production data and real government users. See [DEPLOY.md](./DEPLOY.md) for the full production
-resource table, CI/CD wiring, secrets, and redeploy/rollback commands.
+`wrangler deploy` or a `--remote` D1 command without the user explicitly saying so for that
+specific change** — this project has live production data and real government users. There is no
+CI/CD; deploys are manual, run from this machine. See [DEPLOY.md](./DEPLOY.md) for the full
+production resource table, secrets, and redeploy/rollback commands.
 
 ## Scripts and Data (`scripts_and_data/`)
 
