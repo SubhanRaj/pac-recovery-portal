@@ -28,18 +28,18 @@ const STATUS_BADGE: Record<RequestRow["status"], string> = {
   denied: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
 };
 
-// Same reason-required prompt shape as promptUnlockReason() in alerts.ts (single SweetAlert2
+// Same reason-required prompt shape as promptResetReason() in alerts.ts (single SweetAlert2
 // textarea) — the admin always types their own note here, approve or deny, never auto-copied
 // from the DEO's submitted reason. Not added to alerts.ts since its title/verb differ per action
 // and there's only this one call site pair.
 async function promptResolveNote(action: "approve" | "deny", districtName: string): Promise<string | null> {
   const result = await window.Swal.fire({
     icon: action === "approve" ? "question" : "warning",
-    title: `${action === "approve" ? "Approve" : "Deny"} unlock request — ${districtName}?`,
+    title: `${action === "approve" ? "Approve" : "Deny"} reset request — ${districtName}?`,
     input: "textarea",
     inputPlaceholder: "Your note (required)",
     showCancelButton: true,
-    confirmButtonText: action === "approve" ? "Approve & Unlock" : "Deny",
+    confirmButtonText: action === "approve" ? "Approve & Reset" : "Deny",
     cancelButtonText: "Cancel",
     confirmButtonColor: action === "approve" ? "#1d4ed8" : "#dc2626",
     allowOutsideClick: false,
@@ -63,7 +63,7 @@ export default function UnlockRequestsPage() {
       const res = await apiFetch<{ rows: RequestRow[] }>("/api/admin/unlock-requests", undefined, "admin");
       setRows(res.rows);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load unlock requests.");
+      setError(err instanceof ApiError ? err.message : "Failed to load reset requests.");
     } finally {
       setLoading(false);
     }
@@ -84,7 +84,7 @@ export default function UnlockRequestsPage() {
         { method: "POST", body: JSON.stringify({ id: row.id, action, note }) },
         "admin"
       );
-      notifyToast({ icon: "success", title: action === "approve" ? "District unlocked" : "Request denied" });
+      notifyToast({ icon: "success", title: action === "approve" ? "District reset to baseline" : "Request denied" });
       await load();
     } catch (err) {
       notifyToast({ icon: "error", title: "Failed", text: err instanceof ApiError ? err.message : "Please try again." });
@@ -98,7 +98,7 @@ export default function UnlockRequestsPage() {
   if (!ready) {
     return (
       <div className="flex min-h-full flex-1 flex-col bg-slate-50 dark:bg-slate-950">
-        <AppHeader title="Unlock Requests" role="admin" profile={profile} navLinks={navLinks} onSync={sync} syncing={syncing} lastSyncedAt={lastSyncedAt} districts={districts} />
+        <AppHeader title="Reset Requests" role="admin" profile={profile} navLinks={navLinks} onSync={sync} syncing={syncing} lastSyncedAt={lastSyncedAt} districts={districts} />
         <div className="w-full flex-1 px-4 py-6 sm:px-6 lg:px-[10%] xl:px-[5%] 2xl:px-[3%]">
           <div className="mb-4 flex items-center justify-end">
             <div className="h-9 w-40 animate-pulse rounded-md bg-slate-200 dark:bg-slate-800" />
@@ -112,7 +112,7 @@ export default function UnlockRequestsPage() {
   return (
     <div className="flex min-h-full flex-1 flex-col bg-slate-50 dark:bg-slate-950">
       <AppHeader
-        title="Unlock Requests"
+        title="Reset Requests"
         role="admin"
         profile={profile}
         navLinks={navLinks}
@@ -121,11 +121,13 @@ export default function UnlockRequestsPage() {
         lastSyncedAt={lastSyncedAt}
         districts={districts}
       />
-      <HelpPanel pageKey="admin-unlock-requests" title="Unlock requests">
+      <HelpPanel pageKey="admin-unlock-requests" title="Reset requests">
         <p>
-          A locked-out DEO can submit an in-app request here instead of contacting an Admin
-          outside the portal. Approving unlocks the district (same as the manual Unlock button
-          on Districts); denying leaves it locked. Both require you to type your own note.
+          A DEO can submit an in-app request here asking to have their district reset back to
+          its uploaded baseline, instead of contacting an Admin outside the portal. Approving
+          performs the same full reset as the manual Reset button on Districts (wipes every
+          submitted entry — preserved in the audit log, not the active ledger); denying leaves
+          the district&apos;s entries untouched. Both require you to type your own note.
         </p>
       </HelpPanel>
       <div className="w-full flex-1 px-4 py-6 sm:px-6 lg:px-[10%] xl:px-[5%] 2xl:px-[3%]">
@@ -157,7 +159,7 @@ export default function UnlockRequestsPage() {
               {visibleRows.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">
-                    {loading ? "Loading..." : "No unlock requests."}
+                    {loading ? "Loading..." : "No reset requests."}
                   </td>
                 </tr>
               ) : (

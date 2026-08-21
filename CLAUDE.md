@@ -1,5 +1,7 @@
 # CLAUDE.md — PAC Recovery Portal
 
+> Rolling-session / OTP-skip logic: see [AUTH_ROLLING_SESSION.md](./AUTH_ROLLING_SESSION.md) — confirmed NOT present here, even though the sibling `up-excise-spatial-revenue-optimizer` project (same boilerplate) has it.
+
 Instructions for AI agents working in this repo. [.agents/AGENTS.md](./.agents/AGENTS.md) has the
 core directives (stack limits, no new frameworks without permission, no schema/math changes
 without instruction) — read that too. See [README.md](./README.md) for what the system does,
@@ -11,10 +13,12 @@ This file documents rules to preserve, not a build log.
 
 Government portal (Excise Dept., Uttar Pradesh) tracking recovery of dues from cases originating
 up to FY ending 31-Mar-2019, across 75 districts. District Excise Officers (DEOs) submit recovery
-figures every month; an Admin reviews, exports, and can unlock a district's period for re-entry.
-One Next.js app on `@opennextjs/cloudflare`, backed by Cloudflare D1 via Drizzle, with HttpOnly
-cookie sessions and magic-link admin auth. Keep changes in the spirit of the codebase: the
-smallest diff that works, matching existing conventions rather than inventing new ones.
+updates whenever they have new figures — each submission is a permanent, append-only ledger entry
+(see [PLAN.md](./PLAN.md)); an Admin reviews, exports, and can reset a district's entire ledger
+back to its uploaded baseline. One Next.js app on `@opennextjs/cloudflare`, backed by Cloudflare
+D1 via Drizzle, with HttpOnly cookie sessions and magic-link admin auth. Keep changes in the
+spirit of the codebase: the smallest diff that works, matching existing conventions rather than
+inventing new ones.
 
 ## Repo shape
 
@@ -40,29 +44,34 @@ are the authoritative reasoning) for the full column reference. Rules to preserv
   baseline for cases originating up to FY ending 31-Mar-2019 — never computed or DEO-editable,
   never re-entered per period. `NULL` for districts the department hasn't yet supplied figures
   for.
-- **Lock state is per `(district, period)` on `pac_dues`, not district-lifetime.** A district can
-  have many `pac_dues` rows over time, each independently locked/unlocked. Any new route touching
-  lock state must take a `period`, never assume "the" lock state for a district.
+- **`pac_dues` is an append-only ledger, no `period`, no lock/unlock.** A district can have
+  arbitrarily many `pac_dues` rows, one per DEO submission, ordered by `id`/`createdAt`. Every row
+  is immutable from the moment it's inserted — the submit route only ever `INSERT`s, never
+  `UPDATE`s an existing row. See [PLAN.md](./PLAN.md) for the full design and why.
 - **`pac_dues.openingBalance`/`netRecoverable` are computed server-side only**, never trusted from
-  the client — `openingBalance` chains from the previous period's `netRecoverable` (or
-  `totalDues − collectedTillDate` for a district's first period). See `lib/dues-fields.ts`'s
-  `computeNetRecoverable()`.
+  the client — `openingBalance` chains from the district's latest (highest-`id`) `pac_dues` row's
+  `netRecoverable` (or `totalDues − collectedTillDate` if this is the district's first-ever
+  entry). See `lib/dues-fields.ts`'s `computeNetRecoverable()`.
 - **`pac_dues.rcCount`/`rcAmount`/`rcDetails`** (RC — Recovery Certificate — issued against
   defaulters this period) are purely informational: they never enter
   `computeNetRecoverable()` — an RC is issued to inform a defaulter what they owe, regardless of
   what's recovered. `rcDetails` is a JSON-stringified `RcDetail[]` (`lib/dues-fields.ts`) whose
   amounts must sum to `rcAmount`, enforced server-side (`validateRcDetails()`, called from the
   submit route) — never trusted from the client.
-- No "Open Next Period" mechanic exists yet — opening a district's next monthly period is a
-  manual admin action, not automatic. Building it is real, undone work, not a documentation gap.
+- **A DEO submission can never be edited or deleted — only an Admin's district-level reset
+  clears it**, and even then the wiped rows are preserved in `audit_log`'s metadata, not
+  destroyed. `POST /api/admin/reset-district` deletes every `pac_dues` row for a district (a
+  fresh submit afterwards chains from the uploaded baseline again); it never edits a single row
+  in place. Don't build a per-field edit path for an already-submitted entry.
 - **`Demo District`** is a real row, used only for pre-launch end-to-end testing.
   `/api/admin/truncate-demo-data` is hardcoded server-side to `district_name = 'Demo District'` —
   never parameterize this route, the whole point is that it's physically incapable of deleting a
   real district even given a bad request body.
 - **Data-entry scope**: only dues from cases originating up to FY ending 31-Mar-2019 are tracked
   here — a static bilingual disclaimer banner on the DEO data-entry page, not a live date check
-  (dues can predate the 1970s). Recovery *entries* happen in real time, monthly; the underlying
-  dues stock itself never grows — don't build anything that lets a DEO or admin add new dues.
+  (dues can predate the 1970s). Recovery *entries* happen in real time, whenever a DEO has a new
+  figure; the underlying dues stock itself never grows — don't build anything that lets a DEO or
+  admin add new dues.
 
 ## Auth
 
@@ -83,8 +92,8 @@ overview. Rules to preserve:
 - `requireSession(req, role)` (`lib/auth-guard.ts`) is the one place session verification happens
   — any new route touching DEO or admin data must call it, exactly like every existing route does.
   Don't let a new route trust `body.districtId`/`body.id` on its own.
-- **One owner-tier gate, everything else is equal privilege.** Every admin can lock/unlock
-  districts, view data, and export, same as always — the only owner-only surface is
+- **One owner-tier gate, everything else is equal privilege.** Every admin can reset a district's
+  ledger, view data, and export, same as always — the only owner-only surface is
   `/admin/users` (reachable from the profile pill dropdown, "Manage Admins") and its
   `/api/admin/users*` routes, gated by `isOwnerEmail()` (`lib/auth-guard.ts`): the signed-in
   admin's email must match the `OWNER_EMAIL` Wrangler secret. Ordinary admins don't see the link
@@ -101,9 +110,9 @@ See [SECURITY.md](./SECURITY.md) for the full security architecture (session aut
 rate limiting, server-side trust boundaries). The one rule worth repeating here since it's easy to
 violate by accident: **never commit anything under `scripts_and_data/` that isn't already
 gitignore-excluded by pattern** — check `.gitignore`'s `scripts_and_data/*.sql`, `*.csv`, `*.txt`,
-`*.py`, `*hash*`, and `scripts_and_data/backups/` rules before adding a new data-processing script
-or export there; if a new file type doesn't match an existing pattern, add the pattern rather than
-committing the file.
+`*.py`, `*.xlsx`, `*.xls`, `*hash*`, and `scripts_and_data/backups/` rules before adding a new
+data-processing script or export there; if a new file type doesn't match an existing pattern, add
+the pattern rather than committing the file.
 
 ## Validation rules
 
@@ -124,10 +133,10 @@ committing the file.
 4. **RC Details must reconcile**, enforced server-side (`validateRcDetails()` in
    `lib/dues-fields.ts`, called from the submit route): if `rcCount > 0`, exactly that many
    `RcDetail` rows are required and their `rcAmount`s must sum to the period's `rcAmount`.
-5. **Two-step lock confirm**: a plain "are you sure" dialog (`confirmFinalSubmit()`), then the
+5. **Two-step submit confirm**: a plain "are you sure" dialog (`confirmFinalSubmit()`), then the
    name-entry + liability-disclaimer prompt (`promptDeoNameAndLock()`) — both in `lib/alerts.ts`.
    Don't collapse this back to one dialog — the split is deliberate, it gives a DEO a genuine
-   second chance to cancel before the irreversible name-entry step.
+   second chance to cancel before the irreversible submit step.
 
 ## UI conventions
 
@@ -137,7 +146,7 @@ committing the file.
   user-confirmed government-form language, not a draft.
 - **Feedback split**: field-level errors render inline; multi-field/non-field-specific validation
   errors use a SweetAlert2 **toast** (`notifyToast()`); blocking confirms before an irreversible
-  action (lock, admin unlock, truncate-demo, logout) use a SweetAlert2 **modal**. Don't add a new
+  action (submit, admin reset, truncate-demo, logout) use a SweetAlert2 **modal**. Don't add a new
   blocking modal for a routine validation message; don't add a new inline banner for an
   irreversible-action confirm.
 - **No emojis anywhere in the UI** — Tabler Icons (webfont) only.
@@ -148,8 +157,8 @@ committing the file.
   `exportDistrictsToXlsx()`, verify any page-setup/frozen-pane change with a real unzip-and-grep of
   the generated `.xlsx` (`<pane .../>`, `<pageSetup .../>` in `xl/worksheets/sheet1.xml`), not
   just "no error thrown."
-- Destructive/irreversible admin actions (unlock, truncate-demo) use a red (`#dc2626`) confirm
-  button and Hindi cancel text, matching the DEO-side lock/logout dialogs.
+- Destructive/irreversible admin actions (reset, truncate-demo) use a red (`#dc2626`) confirm
+  button and Hindi cancel text, matching the DEO-side submit/logout dialogs.
 - **Routine create/edit forms use a slide-in drawer** (`components/ui/AdminUserDrawer.tsx`), not a
   SweetAlert2 form dialog — a Swal popup is reserved for the toast/blocking-confirm cases above,
   not multi-field data entry. If you add another admin CRUD flow, follow this same drawer shape
@@ -169,5 +178,8 @@ record manually.
 
 - This repo has no pre-commit hook enforcing the `scripts_and_data/` gitignore rules above — a
   violating file only gets caught by review.
-- Bulk DEO provisioning and an "Open Next Period" mechanic (opening a district's next monthly
-  period today is a manual admin action) are still out of scope for now.
+- Bulk DEO provisioning is still out of scope for now.
+- `audit_log` is 45-day prune-on-read (`app/api/admin/audit-log/route.ts`'s `RETENTION_DAYS`,
+  see README's API table). A district reset's `priorEntries` snapshot (see
+  [PLAN.md](./PLAN.md)) is the only place a wiped submission survives — if reset history needs to
+  outlive 45 days, `RETENTION_DAYS` needs revisiting again.

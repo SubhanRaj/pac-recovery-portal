@@ -16,7 +16,6 @@ export type CachedDistrict = {
 export type CachedPacDues = {
   id: number;
   districtId: number;
-  period: string;
   openingBalance: number;
   rcCount: number;
   rcAmount: number;
@@ -27,12 +26,8 @@ export type CachedPacDues = {
   courtCaseCount: number;
   courtStayedAmount: number;
   netRecoverable: number;
-  lockStatus: number;
-  lockedAt: string | null;
   submittedByName: string | null;
-  unlockedAt: string | null;
-  unlockReason: string | null;
-  unlockedBy: string | null;
+  createdAt: string;
 };
 
 const db = new Dexie("pac-recovery-portal") as Dexie & {

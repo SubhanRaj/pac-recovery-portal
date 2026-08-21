@@ -86,20 +86,13 @@ export function useAdminData() {
     })();
   }, [router]);
 
-  // Patches only the (districtId, period) row that was unlocked — the rest of that district's
-  // pac_dues rows (other periods) are untouched, same "unlock never clears data" rule as the
-  // reference project.
-  async function unlock(districtId: number, period: string, reason: string) {
-    await apiFetch("/api/admin/unlock", { method: "POST", body: JSON.stringify({ districtId, period, reason }) }, "admin");
-    const patch = {
-      lockStatus: 0,
-      unlockedAt: new Date().toISOString(),
-      unlockReason: reason,
-      unlockedBy: profile?.name ?? profile?.email ?? null,
-    };
-    setPacDues((prev) => prev.map((p) => (p.districtId === districtId && p.period === period ? { ...p, ...patch } : p)));
-    const row = await db.adminPacDues.where({ districtId, period }).first();
-    if (row) await db.adminPacDues.update(row.id, patch);
+  // Deletes every pac_dues row for the district, locally too (the server already preserved what
+  // was deleted in audit_log's metadata — see PLAN.md) — a reset is district-wide, not a
+  // per-entry patch.
+  async function resetDistrict(districtId: number, reason: string) {
+    await apiFetch("/api/admin/reset-district", { method: "POST", body: JSON.stringify({ districtId, reason }) }, "admin");
+    setPacDues((prev) => prev.filter((p) => p.districtId !== districtId));
+    await db.adminPacDues.where({ districtId }).delete();
   }
 
   async function truncateDemo() {
@@ -107,5 +100,5 @@ export function useAdminData() {
     await sync();
   }
 
-  return { ready, profile, districts, pacDues, setDistricts, setPacDues, sync, syncing, lastSyncedAt, unlock, truncateDemo, error, setError };
+  return { ready, profile, districts, pacDues, setDistricts, setPacDues, sync, syncing, lastSyncedAt, resetDistrict, truncateDemo, error, setError };
 }

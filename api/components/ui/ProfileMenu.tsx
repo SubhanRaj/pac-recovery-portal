@@ -13,18 +13,9 @@ export type Profile = {
   // display stays district-driven. Falls back to the role label / raw email when absent.
   name?: string | null;
   designation?: string | null;
-  // Only meaningful for role "deo" — null for admin profiles. Lets deo-data-entry/page.tsx tell
-  // a still-locked period apart from a freshly-unlocked one right after login (period-scoped,
-  // not district-lifetime — see db/schema.ts's pacDues).
-  currentPeriod?: {
-    period: string;
-    lockStatus: number;
-    lockedAt: string | null;
-    submittedByName: string | null;
-  } | null;
-  // Also DEO-only — the DEO's own pending self-service unlock request, if any. Re-fetched on
-  // every load same as lockStatus, never cached.
-  pendingUnlockRequest?: { requestedAt: string; reason: string } | null;
+  // DEO-only — the DEO's own pending self-service district-reset request, if any (see
+  // PLAN.md's ledger design). Re-fetched on every load, never cached.
+  pendingResetRequest?: { requestedAt: string; reason: string } | null;
   // Admin-only — true only for the single admin whose email matches the OWNER_EMAIL secret
   // (see app/api/auth/me/route.ts). Gates the "Manage Admins" link below: ordinary admins never
   // see it, since other officers don't need visibility into each other's accounts.
@@ -39,7 +30,7 @@ export default function ProfileMenu({
   profile: Profile | null;
   onLogout?: () => void;
   // Admin-only — relocated here from AppHeader's own header row to free up width once a 4th
-  // nav link (Unlock Requests) was added. Undefined on DEO pages, which never render it.
+  // nav link (Reset Requests) was added. Undefined on DEO pages, which never render it.
   lastSyncedAt?: string | null;
 }) {
   const [open, setOpen] = useState(false);

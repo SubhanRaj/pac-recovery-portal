@@ -2,12 +2,14 @@
 
 A production internal portal for the Department of Excise, Government of Uttar Pradesh, tracking
 recovery of dues from cases originating up to FY ending 31-Mar-2019, across 75 districts. District
-Excise Officers (DEOs) submit recovery figures every month; an Admin reviews, exports, and can
-unlock a district's period for re-entry.
+Excise Officers (DEOs) submit recovery updates whenever they have new figures — each submission is
+a permanent, append-only ledger entry; an Admin reviews, exports, and can reset a district's
+entire ledger back to its uploaded baseline.
 
-See [CLAUDE.md](./CLAUDE.md) for the rules an AI agent must follow when working in this repo,
-[SECURITY.md](./SECURITY.md) for the security architecture, [DEPLOY.md](./DEPLOY.md) for
-production state and deploy commands, and [TESTING.md](./TESTING.md) for how to test a change.
+See [PLAN.md](./PLAN.md) for the design record behind the append-only ledger, [CLAUDE.md](./CLAUDE.md)
+for the rules an AI agent must follow when working in this repo, [SECURITY.md](./SECURITY.md) for
+the security architecture, [DEPLOY.md](./DEPLOY.md) for production state and deploy commands, and
+[TESTING.md](./TESTING.md) for how to test a change.
 
 ## Tech Stack
 
@@ -41,12 +43,13 @@ See `api/db/schema.ts` for the full column reference and inline reasoning. Key p
     department-sourced, read-only baseline for cases originating up to FY ending 31-Mar-2019 —
     never DEO-editable, never re-entered per period. `NULL` for the districts the department
     hasn't yet supplied figures for.
-*   **`pac_dues`** — the recurring **monthly** snapshot, one row per `(districtId, period)`
-    (`period` is `"YYYY-MM"`). `openingBalance` is the prior period's `netRecoverable` (or
-    `totalDues − collectedTillDate` for a district's first period) — computed server-side only,
-    never trusted from the client. Lock/unlock, `lockedAt`, `submittedByName`, and unlock metadata
-    (`unlockedAt`/`unlockReason`/`unlockedBy`) all live here, **per period** — a district's lock
-    state is scoped to one month, not district-lifetime.
+*   **`pac_dues`** — an **append-only ledger**, arbitrarily many rows per `districtId`, one per
+    DEO submission, ordered by `id`/`createdAt`. Every row is immutable from the moment it's
+    inserted — the submit route only ever `INSERT`s, never `UPDATE`s an existing row, and no route
+    ever edits a field in place. `openingBalance` is the district's latest (highest-`id`) row's
+    `netRecoverable` (or `totalDues − collectedTillDate` for a district's first-ever entry) —
+    computed server-side only, never trusted from the client. See [PLAN.md](./PLAN.md) for the
+    full design and why.
 *   **`pac_dues.rcCount`/`rcAmount`/`rcDetails`** — RCs (Recovery Certificates) issued against
     defaulters this period. Informational only: independent of `recoveredThisPeriod`/
     `netRecoverable`, an RC tells a defaulter what they owe regardless of what's actually
@@ -54,13 +57,15 @@ See `api/db/schema.ts` for the full column reference and inline reasoning. Key p
     per RC, its amounts must sum to `rcAmount`, enforced server-side.
 *   **`users`** — `role: "deo" | "admin"`. DEOs are keyed by `cugHash` (SHA-256 of their 10-digit
     CUG mobile number); admins by `email` (magic-link recipient).
-*   No "Open Next Period" mechanic exists yet — opening a district's next monthly period is
-    manual, not automatic.
+*   A DEO submission can never be edited or deleted — only an Admin's district-level reset
+    (`POST /api/admin/reset-district`) clears it, deleting every `pac_dues` row for that district
+    at once (never a single row in place) so a fresh submit chains from the uploaded baseline
+    again. The wiped rows are preserved in that reset's `audit_log` metadata, not destroyed.
 
 **Data-entry scope**: this portal only tracks dues from cases that originated up to FY ending
 31-Mar-2019 — a static bilingual banner on the DEO data-entry page, not a live date check (dues
-can predate the 1970s). Recovery *entries* happen in real time, monthly; the underlying dues stock
-itself never grows.
+can predate the 1970s). Recovery *entries* happen whenever a DEO has a new figure, with no cap on
+how often; the underlying dues stock itself never grows.
 
 ## Calculation Logic
 
@@ -77,22 +82,26 @@ for a live preview:
 
 ## DEO Flow (`/login` → `/deo-data-entry`)
 
-Single-page form. CUG login → session cookie → form pre-filled from the district's current period
-(read-only Total Dues/Opening Balance, editable RC Count/Amount + per-RC breakdown, Recovered This
-Period/Batte Khatte/Court Stayed) → two-step lock confirm (plain "are you sure" dialog, then a
-name-entry prompt with a liability disclaimer, validated against blank/digits/designation-words)
-→ `POST /api/pac-dues/submit` locks the period. A locked DEO can file a self-service unlock
-request (`POST /api/deo/request-unlock`) instead of waiting on the Admin to notice.
+Single-page form. CUG login → session cookie → form pre-filled with the district's current Opening
+Balance (from its latest ledger entry, or the uploaded baseline if this is its first), blank
+editable RC Count/Amount + per-RC breakdown, Recovered This Period/Batte Khatte/Court Stayed →
+two-step submit confirm (plain "are you sure" dialog, then a name-entry prompt with a liability
+disclaimer, validated against blank/digits/designation-words) → `POST /api/pac-dues/submit` inserts
+a new permanent ledger entry — never locked, never edited, and the DEO can submit again immediately
+with no cap on how often. A read-only "My Submissions" panel shows every entry the DEO has ever
+made. If a DEO needs their district's data reset back to the baseline (e.g. a bad entry), they can
+file a self-service reset request (`POST /api/deo/request-reset`) instead of waiting on the Admin
+to notice.
 
 ## Admin Flow (`/admin` → `/admin/districts` → `/admin/districts/detail`)
 
 Magic-link login (`/login` → email → `/verify`) → Dashboard (KPI cards, top-15-by-net-recoverable
-chart, lock-status donut) → Districts table (search/sort/paginate, per-row Unlock, Excel/SQL
-export) → District Detail (every period a district has ever had). Unlock Requests and Audit Log
-pages round out the admin surface. Every admin can lock/unlock, view all data, and export —
-managing who has an admin account at all (`/admin/users`, "Manage Admins" in the profile pill) is
-owner-only, gated by the `OWNER_EMAIL` secret (see `CLAUDE.md`'s Auth section). There is still no
-bulk DEO provisioning.
+chart, submission-status donut) → Districts table (search/sort/paginate, per-row Reset, Excel/SQL
+export) → District Detail (every entry a district has ever had). Reset Requests and Audit Log
+pages round out the admin surface. Every admin can reset a district's ledger, view all data, and
+export — managing who has an admin account at all (`/admin/users`, "Manage Admins" in the profile
+pill) is owner-only, gated by the `OWNER_EMAIL` secret (see `CLAUDE.md`'s Auth section). There is
+still no bulk DEO provisioning.
 
 ## API (`api/app/api/*`)
 
@@ -106,14 +115,14 @@ Session auth via `requireSession(req, role)` reading the HttpOnly cookie.
 | `/api/auth/verify-magic-link` | POST | Admin login step 2 — exchanges the token for a session cookie. |
 | `/api/auth/me` | GET | Session + current-period info for the logged-in user. |
 | `/api/auth/logout` | POST | Clears the session cookie for the given role. |
-| `/api/pac-dues/mine` | GET | DEO's district baseline + current period row. |
-| `/api/pac-dues/submit` | POST | DEO submits + locks the current period. |
-| `/api/deo/request-unlock` | POST | DEO's self-service unlock request (FormData). |
-| `/api/admin/districts` | GET | Full districts + pac_dues dump, for the Dexie cache. |
-| `/api/admin/unlock` | POST | Admin unlocks a `(district, period)`. |
-| `/api/admin/unlock-requests` | GET | List of unlock requests. |
-| `/api/admin/unlock-requests/resolve` | POST | Approve/deny an unlock request. |
-| `/api/admin/audit-log` | GET | Paginated audit trail (30-day retention, pruned on read). |
+| `/api/pac-dues/mine` | GET | DEO's district baseline + full ledger history. |
+| `/api/pac-dues/submit` | POST | DEO inserts a new permanent ledger entry. |
+| `/api/deo/request-reset` | POST | DEO's self-service district-reset request (FormData). |
+| `/api/admin/districts` | GET | Full districts + every pac_dues ledger entry, for the Dexie cache. |
+| `/api/admin/reset-district` | POST | Admin wipes every ledger entry for a district back to baseline. |
+| `/api/admin/unlock-requests` | GET | List of reset requests. |
+| `/api/admin/unlock-requests/resolve` | POST | Approve/deny a reset request. |
+| `/api/admin/audit-log` | GET | Paginated audit trail (45-day retention, pruned on read). |
 | `/api/admin/truncate-demo-data` | POST | Deletes the hardcoded `Demo District` row only. |
 | `/api/admin/users` | GET, POST | Owner-only: list/add admin accounts. |
 | `/api/admin/users/update` | POST | Owner-only: edit an admin's name/email/designation. |
@@ -152,22 +161,13 @@ flowchart TD
     style MagicErr fill:#dc2626,color:#fff
 ```
 
-### 2. DEO data entry — single period, no wizard
+### 2. DEO data entry — append-only ledger, unlimited submissions
 
 ```mermaid
 flowchart TD
-    Login(["DEO logs in"]) --> Me["GET /api/auth/me?role=deo"]
-    Me --> LockCheck{"currentPeriod.lockStatus"}
-
-    LockCheck -->|"locked"| LockedScreen["Data Already Locked screen<br/>(read-only, shows locked-by/at)"]
-    LockedScreen --> PendingCheck{"pendingUnlockRequest?"}
-    PendingCheck -->|"yes"| PendingBanner["Pending since … banner<br/>no resubmit until resolved"]
-    PendingCheck -->|"no"| ReqUnlock["Request Unlock button<br/>→ textarea, reason required"]
-    ReqUnlock --> PostUnlock["POST /api/deo/request-unlock<br/>(FormData)"]
-    PostUnlock --> PendingBanner
-
-    LockCheck -->|"unlocked"| Mine["GET /api/pac-dues/mine<br/>totalDues, collectedTillDate,<br/>current period row"]
-    Mine --> Form["Form pre-filled: Opening Balance<br/>(read-only) + RC Count/Amount +<br/>RC Detail rows + Recovered This<br/>Period + Batte Khatte + Court Stayed"]
+    Login(["DEO logs in"]) --> Me["GET /api/auth/me?role=deo<br/>pendingResetRequest?"]
+    Me --> Mine["GET /api/pac-dues/mine<br/>totalDues, collectedTillDate,<br/>latest entry + full history"]
+    Mine --> Form["Form pre-filled: Opening Balance<br/>(read-only, from latest entry) + RC<br/>Count/Amount + RC Detail rows +<br/>Recovered This Period + Batte<br/>Khatte + Court Stayed — all blank"]
     Form --> LiveCalc["Live preview: Total Dues Left,<br/>Net Recoverable (computeNetRecoverable)"]
     LiveCalc --> ClientValidate{"Anti-blank, count/amount<br/>synchrony, RC Details sum<br/>= RC Amount, math-safety gate"}
     ClientValidate -->|"fails"| Toast["SweetAlert2 toast, no submit"]
@@ -175,45 +175,49 @@ flowchart TD
     Confirm1 --> Confirm2["promptDeoNameAndLock()<br/>name + liability disclaimer"]
     Confirm2 --> Submit["POST /api/pac-dues/submit"]
 
-    Submit --> ServerValidate{"Server re-validates:<br/>non-negative, synchrony,<br/>validateRcDetails(), math-safety,<br/>not already locked (409)"}
-    ServerValidate -->|"fails"| Rejected["400/409 — form shows error,<br/>nothing written"]
-    ServerValidate -->|"passes"| Lock["Server computes netRecoverable,<br/>sets lockStatus=1, lockedAt,<br/>submittedByName + audit_log"]
-    Lock --> Done(["Submitted & Locked —<br/>redirect to /login"])
+    Submit --> ServerValidate{"Server re-validates:<br/>non-negative, synchrony,<br/>validateRcDetails(), math-safety"}
+    ServerValidate -->|"fails"| Rejected["400 — form shows error,<br/>nothing written"]
+    ServerValidate -->|"passes"| Insert["Server computes netRecoverable,<br/>INSERTs a new permanent pac_dues<br/>row + audit_log — never edits<br/>an existing row"]
+    Insert --> Refresh["Form clears, refetches mine —<br/>DEO can submit again immediately,<br/>anytime, no cap"]
 
-    style Lock fill:#16a34a,color:#fff
-    style Done fill:#16a34a,color:#fff
+    Mine -.->|"district needs a full<br/>do-over (bad entry)"| ReqReset["Request Reset button<br/>→ textarea, reason required"]
+    ReqReset --> PostReset["POST /api/deo/request-reset<br/>(FormData)"]
+    PostReset --> PendingBanner["Pending since … banner<br/>until Admin resolves"]
+
+    style Insert fill:#16a34a,color:#fff
+    style Refresh fill:#16a34a,color:#fff
     style Rejected fill:#dc2626,color:#fff
     style Toast fill:#f59e0b,color:#000
 ```
 
-### 3. Admin dashboard — Dexie-first, unlock, export
+### 3. Admin dashboard — Dexie-first, reset, export
 
 ```mermaid
 flowchart TD
     AdminLogin(["Admin logs in -> /admin"]) --> CacheCheck{"Dexie IndexedDB cache<br/>(adminDistricts/adminPacDues)<br/>populated?"}
 
     CacheCheck -->|"yes"| UseCache["Render from cache immediately<br/>no D1 query"]
-    CacheCheck -->|"empty / manual Sync"| Fetch["GET /api/admin/districts<br/>full districts + pac_dues dump"]
+    CacheCheck -->|"empty / manual Sync"| Fetch["GET /api/admin/districts<br/>full districts + every pac_dues entry"]
     Fetch --> StoreCache[("db.transaction: clear + bulkPut<br/>into adminDistricts/adminPacDues")]
     StoreCache --> UseCache
 
-    UseCache --> Dashboard["/admin: KPI cards, top-15 chart,<br/>lock-status donut (AdminDashboard.tsx)"]
-    UseCache --> Districts["/admin/districts: TanStack Table,<br/>search/sort/paginate, RC + dues columns"]
-    UseCache --> Detail["/admin/districts/detail:<br/>every period this district has had"]
+    UseCache --> Dashboard["/admin: KPI cards, top-15 chart,<br/>submission-status donut (AdminDashboard.tsx)"]
+    UseCache --> Districts["/admin/districts: TanStack Table,<br/>search/sort/paginate, RC + dues columns,<br/>latest entry per district"]
+    UseCache --> Detail["/admin/districts/detail:<br/>every entry this district has ever submitted"]
 
-    Districts --> UnlockClick["Unlock button on a locked row"]
-    Detail --> UnlockClick
-    UnlockClick --> Reason["promptUnlockReason()"]
-    Reason --> PostUnlock["POST /api/admin/unlock<br/>{ districtId, period, reason }"]
-    PostUnlock --> PatchBoth["Patch React state + Dexie row<br/>lockStatus=0, unlockedAt/Reason/By"]
+    Districts --> ResetClick["Reset button on a submitted district"]
+    Detail --> ResetClick
+    ResetClick --> Reason["promptResetReason()"]
+    Reason --> PostReset["POST /api/admin/reset-district<br/>{ districtId, reason }"]
+    PostReset --> PatchBoth["Delete every pac_dues row for the<br/>district from React state + Dexie —<br/>server preserves them in audit_log"]
 
-    UseCache --> UnlockReqPage["/admin/unlock-requests"]
-    UnlockReqPage --> Resolve{"Approve or deny?"}
-    Resolve -->|"approve"| ResolveApprove["POST …/resolve<br/>unlocks the (district,period) too"]
+    UseCache --> ResetReqPage["/admin/unlock-requests<br/>(Reset Requests)"]
+    ResetReqPage --> Resolve{"Approve or deny?"}
+    Resolve -->|"approve"| ResolveApprove["POST …/resolve<br/>same full reset as above"]
     Resolve -->|"deny"| ResolveDeny["POST …/resolve<br/>adminNote required"]
 
     UseCache --> Export["Export button (lib/export.ts)"]
-    Export --> Xlsx["ExcelJS: Summary + Districts<br/>(RC/dues columns) + Lock Status sheets<br/>— frozen header, A4 landscape"]
+    Export --> Xlsx["ExcelJS: Summary + Districts<br/>(RC/dues columns) + Submission Status sheets<br/>— frozen header, A4 landscape"]
     Export --> Sql["Plain-text SQL backup:<br/>districts + pac_dues INSERTs"]
 
     style UseCache fill:#16a34a,color:#fff
@@ -242,6 +246,7 @@ resource table, CI/CD wiring, secrets, and redeploy/rollback commands.
 
 ## Scripts and Data (`scripts_and_data/`)
 
-`.gitignore` excludes `*.sql`, `*.csv`, `*.txt`, `*.py`, anything matching `*hash*`, and the
-`backups/` directory under here — the department's contact directory (real officer names, phone
-numbers, CUG numbers) and any D1 export/backup live here locally only, never in git.
+`.gitignore` excludes `*.sql`, `*.csv`, `*.txt`, `*.py`, `*.xlsx`, `*.xls`, anything matching
+`*hash*`, and the `backups/` directory under here — the department's contact directory (real
+officer names, phone numbers, CUG numbers), any D1 export/backup, and any source Excel workbook
+live here locally only, never in git.

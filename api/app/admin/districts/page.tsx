@@ -17,7 +17,7 @@ import { DUES_FIELD_LABELS, OPENING_BALANCE_LABEL, isMoneyField, englishLabel } 
 import { DUES_FIELD_ORDER, type Row } from "@/lib/dues-row";
 import { formatIST } from "@/lib/format";
 import { ApiError } from "@/lib/api";
-import { notifyToast, promptUnlockReason, confirmTruncateDemo } from "@/lib/alerts";
+import { notifyToast, promptResetReason, confirmTruncateDemo } from "@/lib/alerts";
 import { exportDistrictsToXlsx, exportDistrictsToSql } from "@/lib/export";
 import { useAdminData } from "@/lib/useAdminData";
 import { setNavDistrictId, consumeNavStatusFilter } from "@/lib/adminNav";
@@ -39,12 +39,12 @@ function formatValue(field: (typeof DUES_FIELD_ORDER)[number], value: number) {
 
 export default function DistrictsPage() {
   const router = useRouter();
-  const { ready, profile, districts, pacDues, sync, syncing, lastSyncedAt, unlock, truncateDemo, error, setError } = useAdminData();
+  const { ready, profile, districts, pacDues, sync, syncing, lastSyncedAt, resetDistrict, truncateDemo, error, setError } = useAdminData();
   const navLinks = adminNavLinks(profile?.isOwner);
-  const [statusFilter, setStatusFilter] = useState<"all" | "locked" | "unlocked">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "submitted" | "notStarted">("all");
   const [globalFilter, setGlobalFilter] = useState("");
 
-  // Deep-linked from the Admin Dashboard's Locked/Unlocked KPI cards, via sessionStorage
+  // Deep-linked from the Admin Dashboard's Submitted/Not Started KPI cards, via sessionStorage
   // (lib/adminNav.ts) rather than a ?status= URL query string.
   useEffect(() => {
     const status = consumeNavStatusFilter();
@@ -62,14 +62,14 @@ export default function DistrictsPage() {
 
   const hasDemoDistrict = districts.some((d) => d.districtName === "Demo District");
 
-  async function handleUnlock(districtId: number, districtName: string, period: string) {
-    const reason = await promptUnlockReason(districtName);
+  async function handleReset(districtId: number, districtName: string) {
+    const reason = await promptResetReason(districtName);
     if (!reason) return;
     try {
-      await unlock(districtId, period, reason);
-      notifyToast({ icon: "success", title: "District unlocked." });
+      await resetDistrict(districtId, reason);
+      notifyToast({ icon: "success", title: "District reset to baseline." });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Unlock failed.");
+      setError(err instanceof ApiError ? err.message : "Reset failed.");
     }
   }
 
@@ -133,19 +133,19 @@ export default function DistrictsPage() {
     }
   }
 
-  // One row per district, its latest pac_dues period — no FY selector here, unlike the
-  // reference project, since this domain has one open period per district, not a 5-year loop.
+  // One row per district, its latest (highest-id) pac_dues entry — a district can have
+  // arbitrarily many entries in this ledger, not a single locked period.
   const rows: Row[] = useMemo(() => {
     const latestByDistrict = new Map<number, (typeof pacDues)[number]>();
     for (const p of pacDues) {
       const existing = latestByDistrict.get(p.districtId);
-      if (!existing || p.period > existing.period) latestByDistrict.set(p.districtId, p);
+      if (!existing || p.id > existing.id) latestByDistrict.set(p.districtId, p);
     }
     return districts
       .filter((d) => {
         if (statusFilter === "all") return true;
-        const lockStatus = latestByDistrict.get(d.id)?.lockStatus ?? 0;
-        return statusFilter === "locked" ? lockStatus === 1 : lockStatus === 0;
+        const hasSubmissions = latestByDistrict.has(d.id);
+        return statusFilter === "submitted" ? hasSubmissions : !hasSubmissions;
       })
       .map((d) => {
         const p = latestByDistrict.get(d.id);
@@ -158,8 +158,8 @@ export default function DistrictsPage() {
           ...values,
           openingBalance: p?.openingBalance ?? 0,
           netRecoverable: p?.netRecoverable ?? 0,
-          lockStatus: p?.lockStatus ?? 0,
-          period: p?.period ?? null,
+          hasSubmissions: p !== undefined,
+          lastSubmittedAt: p?.createdAt ?? null,
         };
       });
   }, [districts, pacDues, statusFilter]);
@@ -180,27 +180,27 @@ export default function DistrictsPage() {
         cell: (info) => info.getValue(),
       }),
       columnHelper.display({
-        id: "period",
-        header: "Period",
-        cell: ({ row }) => row.original.period ?? "—",
+        id: "lastSubmittedAt",
+        header: "Last Submitted",
+        cell: ({ row }) => (row.original.lastSubmittedAt ? formatIST(row.original.lastSubmittedAt) : "—"),
       }),
       columnHelper.display({
         id: "openingBalance",
         header: () => englishLabel(OPENING_BALANCE_LABEL),
         cell: ({ row }) => `₹${row.original.openingBalance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`,
       }),
-      columnHelper.accessor("lockStatus", {
+      columnHelper.accessor("hasSubmissions", {
         header: "Status",
         cell: (info) => (
           <span
             className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-              info.getValue() === 1
-                ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
-                : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+              info.getValue()
+                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                : "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
             }`}
           >
-            <i className={`ti ${info.getValue() === 1 ? "ti-lock" : "ti-lock-open"} text-sm`} />
-            {info.getValue() === 1 ? "Locked" : "Unlocked"}
+            <i className={`ti ${info.getValue() ? "ti-circle-check" : "ti-circle-dashed"} text-sm`} />
+            {info.getValue() ? "Submitted" : "Not Started"}
           </span>
         ),
       }),
@@ -219,15 +219,15 @@ export default function DistrictsPage() {
         id: "actions",
         header: "Action",
         cell: ({ row }) =>
-          row.original.lockStatus === 1 && row.original.period ? (
+          row.original.hasSubmissions ? (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                handleUnlock(row.original.id, row.original.districtName, row.original.period!);
+                handleReset(row.original.id, row.original.districtName);
               }}
               className="rounded-full border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
             >
-              Unlock
+              Reset
             </button>
           ) : null,
       }),
@@ -276,8 +276,9 @@ export default function DistrictsPage() {
           <strong>Export as Excel Workbook</strong> re-syncs first, then builds a spreadsheet
           from the freshly-synced data. <strong>Export as SQL</strong> does the same re-sync
           but downloads a plain <code>.sql</code> restore script instead — useful for taking a
-          manual backup. <strong>Unlock</strong> lets a District Excise Officer re-edit a
-          submission they already locked.
+          manual backup. <strong>Reset</strong> wipes a district&apos;s submitted entries back to
+          its uploaded baseline — the wiped entries are preserved in the audit log, but the
+          district itself starts over.
         </p>
       </HelpPanel>
       <div className="flex w-full flex-1 flex-col px-4 py-6 sm:px-6 lg:px-[10%] xl:px-[5%] 2xl:px-[3%]">
@@ -299,12 +300,12 @@ export default function DistrictsPage() {
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
             <Select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as "all" | "locked" | "unlocked")}
+              onChange={(e) => setStatusFilter(e.target.value as "all" | "submitted" | "notStarted")}
               className="min-w-[9.5rem]"
             >
               <option value="all">All statuses</option>
-              <option value="locked">Locked</option>
-              <option value="unlocked">Unlocked</option>
+              <option value="submitted">Submitted</option>
+              <option value="notStarted">Not Started</option>
             </Select>
             <Button size="xs" onClick={exportExcel} disabled={exporting !== null}>
               <i className={`ti ti-file-spreadsheet text-sm ${exporting === "xlsx" ? "animate-pulse" : ""}`} />

@@ -1,36 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { districts, pacDues, users } from "@/db/schema";
 import { requireSession } from "@/lib/auth-guard";
 import { auditLogInsert } from "@/lib/audit";
 import { withErrorHandling } from "@/lib/with-error-handling";
 
-// Unlock is per (district, period) here, not district-lifetime — needs `period` in the body.
-// Never clears pac_dues's other data fields, same "unlock never clears data" rule as the
-// reference project.
-export const POST = withErrorHandling("admin/unlock", async (req: NextRequest) => {
+// Admin's escape hatch for a district whose ledger genuinely needs a do-over: deletes every
+// pac_dues row for the district (a fresh submit afterwards chains from the uploaded baseline
+// again, same as a district's first-ever entry) — never a field-level edit (see PLAN.md). The
+// deleted rows aren't actually lost: the full JSON of what was deleted goes into this event's
+// audit_log metadata, so "cannot be deleted" holds even though the district's active ledger goes
+// back to empty.
+export const POST = withErrorHandling("admin/reset-district", async (req: NextRequest) => {
   const session = await requireSession(req, "admin");
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { districtId, period, reason } = (await req.json()) as {
-    districtId?: unknown;
-    period?: unknown;
-    reason?: unknown;
-  };
+  const { districtId, reason } = (await req.json()) as { districtId?: unknown; reason?: unknown };
   if (typeof districtId !== "number") {
     return NextResponse.json({ error: "districtId is required" }, { status: 400 });
   }
-  if (typeof period !== "string" || period.trim().length === 0) {
-    return NextResponse.json({ error: "period is required" }, { status: 400 });
-  }
   if (typeof reason !== "string" || reason.trim().length === 0) {
-    return NextResponse.json({ error: "A reason for unlocking is required" }, { status: 400 });
+    return NextResponse.json({ error: "A reason for resetting is required" }, { status: 400 });
   }
 
   const db = getDb();
+  const priorEntries = await db.select().from(pacDues).where(eq(pacDues.districtId, districtId));
+  if (priorEntries.length === 0) {
+    return NextResponse.json({ error: "This district has no submitted entries to reset" }, { status: 404 });
+  }
+
   const [admin] = await db
     .select({ email: users.email, name: users.name, designation: users.designation })
     .from(users)
@@ -43,23 +44,15 @@ export const POST = withErrorHandling("admin/unlock", async (req: NextRequest) =
     .limit(1);
 
   await db.batch([
-    db
-      .update(pacDues)
-      .set({
-        lockStatus: 0,
-        unlockedAt: new Date().toISOString(),
-        unlockReason: reason.trim(),
-        unlockedBy: admin?.name ?? admin?.email ?? null,
-      })
-      .where(and(eq(pacDues.districtId, districtId), eq(pacDues.period, period))),
+    db.delete(pacDues).where(eq(pacDues.districtId, districtId)),
     auditLogInsert(db, {
-      eventType: "district_unlocked",
+      eventType: "district_reset",
       actorRole: "admin",
       actorEmail: admin?.email,
       actorName: admin?.name,
       actorDesignation: admin?.designation,
       districtName: district?.districtName,
-      metadata: { period, reason: reason.trim() },
+      metadata: { reason: reason.trim(), priorEntries },
     }),
   ] as unknown as Parameters<typeof db.batch>[0]);
 

@@ -27,7 +27,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit, _role?: Role
   return body as T;
 }
 
-// For multipart/FormData bodies (e.g. POST /api/deo/request-unlock) — apiFetch() above always
+// For multipart/FormData bodies (e.g. POST /api/deo/request-reset) — apiFetch() above always
 // sets Content-Type: application/json, which would break the multipart boundary the browser
 // needs to set itself for FormData. Same auth/error-shape handling as apiFetch, just without
 // that header.

@@ -6,7 +6,7 @@ import { requireSession } from "@/lib/auth-guard";
 import { withErrorHandling } from "@/lib/with-error-handling";
 
 const PAGE_SIZE = 100;
-const RETENTION_DAYS = 30;
+const RETENTION_DAYS = 45;
 
 export const GET = withErrorHandling("admin/audit-log", async (req: NextRequest) => {
   const session = await requireSession(req, "admin");
@@ -16,9 +16,9 @@ export const GET = withErrorHandling("admin/audit-log", async (req: NextRequest)
 
   const db = getDb();
 
-  // Opportunistic 30-day retention: prune on read rather than a separate cron trigger — this
+  // Opportunistic 45-day retention: prune on read rather than a separate cron trigger — this
   // page is the only consumer of the table, so there's no need for the rows to disappear the
-  // instant they turn 30 days old, just before the next time anyone actually looks.
+  // instant they turn 45 days old, just before the next time anyone actually looks.
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
   await db.delete(auditLog).where(lt(auditLog.createdAt, cutoff));
 

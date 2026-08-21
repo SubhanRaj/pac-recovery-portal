@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 // 75 districts (matches excise-revenue-recovery-portal's list). The 16 with no historical
@@ -33,17 +33,17 @@ export const magicLinkTokens = sqliteTable("magic_link_tokens", {
   usedAt: text("used_at"),
 });
 
-// Recurring monthly snapshot, one row per (district, period). Lock/unlock now lives here
-// (per-period) rather than on districts/users, unlike the reference project's lifetime-once
-// district lock — see pac-recovery-migration-plan.md §3.
+// Append-only ledger, arbitrarily many rows per district — a DEO can submit a recovery update
+// any time; each row is immutable from the moment it's inserted (never UPDATEd, never DELETEd
+// except by an Admin's full district reset, see PLAN.md). No "period" — the old monthly-snapshot
+// model is gone; `id` order (autoincrement, monotonic) is the ledger order.
 export const pacDues = sqliteTable("pac_dues", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   districtId: integer("district_id").notNull().references(() => districts.id),
-  period: text("period").notNull(), // "YYYY-MM"
 
   // Server-computed only, never trusted from the client: districts.totalDues -
-  // districts.collectedTillDate for a district's first period, else previous period's
-  // netRecoverable.
+  // districts.collectedTillDate for a district's first-ever entry, else the district's latest
+  // (highest id) pac_dues row's netRecoverable.
   openingBalance: real("opening_balance").notNull(),
 
   // RC (Recovery Certificate) issued against defaulters this period — informational, ported
@@ -65,19 +65,12 @@ export const pacDues = sqliteTable("pac_dues", {
   courtStayedAmount: real("court_stayed_amount").default(0),
 
   // Server-computed only: max(0, openingBalance - recoveredThisPeriod - batteKhatteAmount -
-  // courtStayedAmount). Becomes the next period's openingBalance.
+  // courtStayedAmount). Becomes the next entry's openingBalance.
   netRecoverable: real("net_recoverable").notNull(),
 
-  lockStatus: integer("lock_status").notNull().default(0),
-  lockedAt: text("locked_at"),
   submittedByName: text("submitted_by_name"),
-  unlockedAt: text("unlocked_at"),
-  unlockReason: text("unlock_reason"),
-  unlockedBy: text("unlocked_by"),
   createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
-}, (table) => ({
-  districtPeriodUnique: uniqueIndex("district_period_unique").on(table.districtId, table.period),
-}));
+});
 
 export const auditLog = sqliteTable("audit_log", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -91,10 +84,11 @@ export const auditLog = sqliteTable("audit_log", {
   createdAt: text("created_at").notNull(),
 });
 
+// A DEO's self-service request to have their district reset back to the uploaded baseline (see
+// PLAN.md) — district-level, not period-level, since there's no period anymore.
 export const unlockRequests = sqliteTable("unlock_requests", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   districtId: integer("district_id").notNull().references(() => districts.id),
-  period: text("period").notNull(), // "YYYY-MM" the DEO is requesting unlock for
   reason: text("reason").notNull(),
   status: text("status", { enum: ["pending", "approved", "denied"] }).notNull().default("pending"),
   requestedAt: text("requested_at").notNull(),

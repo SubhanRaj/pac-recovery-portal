@@ -24,11 +24,12 @@ security-specific detail.
   emails a 15-minute single-use token via Resend; `POST /api/auth/verify-magic-link` exchanges it
   for a session cookie.
 - No plaintext CUG numbers or officer contact details are committed to the repository. The
-  department's real contact directory and any D1 export/backup live only under
-  `scripts_and_data/`, which `.gitignore` excludes by pattern (`*.sql`, `*.csv`, `*.txt`, `*.py`,
-  anything matching `*hash*`, and the `backups/` subdirectory specifically — a plain
-  `scripts_and_data/*.sql` glob does not cover `scripts_and_data/backups/*.sql`, since gitignore
-  globs don't cross a `/` boundary). **Never commit anything under `scripts_and_data/` that isn't
+  department's real contact directory, any D1 export/backup, and any source Excel workbook live
+  only under `scripts_and_data/`, which `.gitignore` excludes by pattern (`*.sql`, `*.csv`,
+  `*.txt`, `*.py`, `*.xlsx`, `*.xls`, anything matching `*hash*`, and the `backups/` subdirectory
+  specifically — a plain `scripts_and_data/*.sql` glob does not cover
+  `scripts_and_data/backups/*.sql`, since gitignore globs don't cross a `/` boundary). **Never
+  commit anything under `scripts_and_data/` that isn't
   already covered by one of these patterns** — add a new pattern rather than committing the file
   if a new file type doesn't match.
 
@@ -71,6 +72,6 @@ Every response (success or error) carries, via `withErrorHandling()`:
 
 ## Multi-write consistency
 
-Routes that touch more than one table in a single logical action (e.g. locking a period and
-writing its audit log entry) use `db.batch()` so a partial failure can't leave related rows
-inconsistent.
+Routes that touch more than one table in a single logical action (e.g. submitting a recovery
+entry and writing its audit log entry, or resetting a district and writing its audit log entry)
+use `db.batch()` so a partial failure can't leave related rows inconsistent.

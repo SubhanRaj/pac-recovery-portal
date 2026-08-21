@@ -132,7 +132,7 @@ export default function RootLayout({
           src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"
           strategy="lazyOnload"
         />
-        {/* Chart.js (CDN) — only consumer today is AdminDashboard's locked/unlocked donut. */}
+        {/* Chart.js (CDN) — only consumer today is AdminDashboard's submission-status donut. */}
         <Script
           src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"
           strategy="lazyOnload"

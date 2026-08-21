@@ -25,12 +25,12 @@ const EVENT_LABELS: Record<string, string> = {
   login_cug: "DEO login (CUG)",
   login_magic_link: "Login (magic link)",
   logout: "Logout",
-  district_locked: "District locked",
-  district_unlocked: "District unlocked",
+  recovery_entry_submitted: "Recovery entry submitted",
+  district_reset: "District reset to baseline",
   deo_provisioned: "DEO(s) provisioned",
-  unlock_requested: "Unlock requested (DEO)",
-  unlock_request_approved: "Unlock request approved",
-  unlock_request_denied: "Unlock request denied",
+  reset_requested: "Reset requested (DEO)",
+  reset_request_approved: "Reset request approved",
+  reset_request_denied: "Reset request denied",
   admin_user_created: "Admin added",
   admin_user_updated: "Admin updated",
   admin_user_deleted: "Admin removed",
@@ -40,7 +40,9 @@ const EVENT_LABELS: Record<string, string> = {
 // (submittedByName, reason, note, inserted/updated/errors/totalRows) — human labels for display,
 // falling back to the raw key for anything not yet mapped.
 const METADATA_KEY_LABELS: Record<string, string> = {
-  submittedByName: "Locked by",
+  submittedByName: "Submitted by",
+  recoveredThisPeriod: "Recovered",
+  netRecoverable: "Net recoverable",
   reason: "Reason",
   note: "Note",
   inserted: "Added",
@@ -72,7 +74,9 @@ function describeMetadata(row: AuditRow): string {
   try {
     const m = JSON.parse(row.metadata) as Record<string, unknown>;
     return Object.entries(m)
-      .map(([k, v]) => `${METADATA_KEY_LABELS[k] ?? k}: ${v}`)
+      // priorEntries is the full deleted-rows snapshot for a district reset — shown as a count
+      // here, not dumped inline; the raw metadata (with every field) is still in row.metadata.
+      .map(([k, v]) => `${METADATA_KEY_LABELS[k] ?? k}: ${k === "priorEntries" && Array.isArray(v) ? `${v.length} entries preserved` : v}`)
       .join(", ");
   } catch {
     return row.metadata;
@@ -155,15 +159,20 @@ export default function AuditLogPage() {
       />
       <HelpPanel pageKey="admin-audit" title="Reading the audit log">
         <p>
-          Every login, logout, district lock/unlock, and DEO provisioning batch is recorded
-          here, newest first. Entries older than 30 days are removed automatically.
+          Every login, logout, recovery entry submission, district reset, and DEO provisioning
+          batch is recorded here, newest first. Entries older than 30 days are removed
+          automatically.
         </p>
         <p>
           Use <strong>Filter by event</strong> to show only one kind of entry, and the sort
           button to flip between newest-first and oldest-first — both apply only to the page of
           entries currently loaded below.
         </p>
-        <p>Unlock events include the reason the admin gave when reopening a submission.</p>
+        <p>
+          A district reset event&apos;s metadata includes the reason given and how many entries
+          were preserved — those entries themselves aren&apos;t shown here, only their count (this
+          log entry is what keeps them from being truly deleted; see PLAN.md).
+        </p>
       </HelpPanel>
       <div className="w-full flex-1 px-4 py-6 sm:px-6 lg:px-[10%] xl:px-[5%] 2xl:px-[3%]">
         {error && (

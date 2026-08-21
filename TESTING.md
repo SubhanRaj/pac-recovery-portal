@@ -22,7 +22,7 @@ Config: `api/playwright.config.ts`. Headless by default (no window server assume
 1. **Login page renders correctly** — the CUG Mobile (DEO) tab is the default, the mobile number
    field is visible and editable.
 2. **Inline validation, no popup** — a malformed mobile number shows an inline error and asserts
-   zero `.swal2-popup` elements exist. SweetAlert2 is reserved for the DEO lock confirm and other
+   zero `.swal2-popup` elements exist. SweetAlert2 is reserved for the DEO submit confirm and other
    irreversible-action confirms — not routine field validation (see CLAUDE.md's UI conventions).
 3. **Magic-link request → inline success card** — submitting the admin email tab shows "Check
    your email" inline instead of a popup.
@@ -41,7 +41,7 @@ Not wired into CI yet — `ci.yml` only runs `tsc --noEmit` + `next build`.
 
 ## Manual smoke test
 
-For a change that touches auth, the submit/lock flow, or the admin dashboard, run through this
+For a change that touches auth, the submit flow, or the admin dashboard, run through this
 against `pnpm run preview` (real Worker + local D1, `http://localhost:8788` by default) before
 calling it done:
 
@@ -49,20 +49,25 @@ calling it done:
 2. **Submit gate** — leave a field blank (toast, no submit), enter a Batte Khatte/Court Stayed
    amount without its count (toast), enter an amount exceeding Total Dues Left (toast), enter an
    `rcCount > 0` with mismatched RC Details total (toast) — each should block, not silently pass.
-3. **Lock** — fill every field correctly, confirm through both dialogs, submit; the period should
-   show `lockStatus = 1` and the DEO should see the "Data Already Locked" screen on next login.
-4. **DEO self-service unlock request** — from the locked screen, submit a reason; confirm it
-   shows as pending.
+3. **Submit, then submit again** — fill every field correctly, confirm through both dialogs,
+   submit; confirm a success toast, the form clears, and Opening Balance drops to reflect the new
+   entry — with no re-login and no lock screen. Immediately submit a second entry and confirm
+   Opening Balance chains from the *first* entry's Net Recoverable, not the original baseline.
+   Both entries should appear in the "My Submissions" panel, oldest last.
+4. **DEO self-service reset request** — click Request Reset, submit a reason; confirm it shows as
+   pending and a second request is blocked while one is pending.
 5. **Admin login** — Email tab, request a magic link, read the token from local D1
    (`wrangler d1 execute excise-bakaya-db --local --command "SELECT token FROM magic_link_tokens ORDER BY id DESC LIMIT 1;"`),
    visit `/verify?token=...`.
-6. **Admin unlock** — resolve the pending unlock request (or unlock directly from
-   `/admin/districts`); confirm the DEO's next login shows the form again, pre-filled with the
-   previously submitted values.
+6. **Admin reset** — resolve the pending reset request (or hit Reset directly from
+   `/admin/districts` or the district detail page); confirm the district's ledger goes empty and
+   the DEO's next submission chains its Opening Balance from the original uploaded baseline again,
+   not from either of the wiped entries.
 7. **Export** — from `/admin/districts`, run both the Excel and SQL export; open the `.xlsx` and
    confirm the header row is frozen and RC/dues columns are present with correct values.
-8. **Audit log** — confirm the lock, unlock-request, and resolve events from the steps above all
-   appear on `/admin/audit`.
+8. **Audit log** — confirm the submission, reset-request, and resolve events from the steps above
+   all appear on `/admin/audit`, and that the reset event's metadata shows the count of preserved
+   entries.
 9. **Admin Users (owner-only)** — sign in as the `OWNER_EMAIL` admin; confirm "Manage Admins"
    appears in the profile pill and `/admin/users` lists every admin. Add one, edit it, remove it
    — each should toast and show up on `/admin/audit`. Then sign in as a *non*-owner admin and

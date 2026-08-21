@@ -17,7 +17,7 @@ import {
   confirmFinalSubmit,
   promptDeoNameAndLock,
   confirmClearForm,
-  confirmUnlockRequest,
+  confirmResetRequest,
   notifyToast,
 } from "@/lib/alerts";
 import Cleave from "cleave.js/react";
@@ -55,11 +55,13 @@ function blankDraft(): Draft {
   };
 }
 
-type CurrentPeriod = {
-  period: string;
-  lockStatus: number;
-  lockedAt: string | null;
-  submittedByName: string | null;
+type HistoryEntry = { id: number; createdAt: string; recoveredThisPeriod: number; netRecoverable: number };
+
+type MineResponse = {
+  totalDues: number | null;
+  collectedTillDate: number | null;
+  current: ({ openingBalance: number; rcDetails: string } & Record<DuesField, number>) | null;
+  history: (HistoryEntry & Record<DuesField, number>)[];
 };
 
 export default function EntryPage() {
@@ -67,6 +69,8 @@ export default function EntryPage() {
   const [ready, setReady] = useState(false);
   const [totalDues, setTotalDues] = useState<number | null>(null);
   const [openingBalance, setOpeningBalance] = useState(0);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [draft, setDraft] = useState<Draft>(blankDraft());
   const [rcDetails, setRcDetails] = useState<DraftRcDetail[]>([]);
   const [rcDetailsTouched, setRcDetailsTouched] = useState(false);
@@ -76,15 +80,22 @@ export default function EntryPage() {
   const [courtTouched, setCourtTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [locked, setLocked] = useState(false);
-  const [lockedInfo, setLockedInfo] = useState<CurrentPeriod | null>(null);
-  const [pendingRequest, setPendingRequest] = useState<{ requestedAt: string; reason: string } | null>(null);
+  const [pendingResetRequest, setPendingResetRequest] = useState<{ requestedAt: string; reason: string } | null>(null);
   const [requestFormOpen, setRequestFormOpen] = useState(false);
   const [requestReason, setRequestReason] = useState("");
   const [requestSubmitting, setRequestSubmitting] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
+
+  // Re-fetches the district's baseline + latest entry after every submit — a DEO can submit
+  // again immediately (no lock, no re-login), so Opening Balance must reflect the new latest
+  // entry right away.
+  async function loadMine() {
+    const mine = await apiFetch<MineResponse>("/api/pac-dues/mine", undefined, "deo");
+    setTotalDues(mine.totalDues);
+    setHistory(mine.history);
+    setOpeningBalance(mine.current?.openingBalance ?? (mine.totalDues ?? 0) - (mine.collectedTillDate ?? 0));
+  }
 
   useEffect(() => {
     (async () => {
@@ -92,6 +103,7 @@ export default function EntryPage() {
       try {
         p = await apiFetch<Profile>("/api/auth/me?role=deo", undefined, "deo");
         setProfile(p);
+        setPendingResetRequest(p.pendingResetRequest ?? null);
         if (consumeJustAuthed()) {
           notifyToast({ icon: "success", title: `Welcome, DEO ${p.districtName ?? ""}`.trim() });
         }
@@ -101,49 +113,14 @@ export default function EntryPage() {
         return;
       }
 
-      if (p.currentPeriod?.lockStatus === 1) {
-        setLocked(true);
-        setLockedInfo(p.currentPeriod);
-        setPendingRequest(p.pendingUnlockRequest ?? null);
-        setReady(true);
-        return;
-      }
-
       try {
-        const mine = await apiFetch<{
-          totalDues: number | null;
-          collectedTillDate: number | null;
-          current: ({ openingBalance: number; rcDetails: string } & Record<DuesField, number>) | null;
-        }>("/api/pac-dues/mine", undefined, "deo");
-        setTotalDues(mine.totalDues);
-        if (mine.current) {
-          setOpeningBalance(mine.current.openingBalance);
-          setDraft({
-            rcCount: String(mine.current.rcCount),
-            rcAmount: String(mine.current.rcAmount),
-            recoveredThisPeriod: String(mine.current.recoveredThisPeriod),
-            batteKhatteCount: String(mine.current.batteKhatteCount),
-            batteKhatteAmount: String(mine.current.batteKhatteAmount),
-            courtCaseCount: String(mine.current.courtCaseCount),
-            courtStayedAmount: String(mine.current.courtStayedAmount),
-          });
-          try {
-            const parsed = JSON.parse(mine.current.rcDetails || "[]") as { rcNumber: string; rcAmount: number; stayed: boolean }[];
-            setRcDetails(
-              syncRcDetailsToCount(
-                parsed.map((d) => ({ rcNumber: d.rcNumber, rcAmount: String(d.rcAmount), stayed: d.stayed })),
-                mine.current.rcCount
-              )
-            );
-          } catch {
-            setRcDetails(syncRcDetailsToCount([], mine.current.rcCount));
-          }
-        }
+        await loadMine();
       } catch {
         // Best-effort — form just starts blank.
       }
       setReady(true);
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   function updateField(field: DuesField, value: string) {
@@ -157,26 +134,19 @@ export default function EntryPage() {
     setRcDetails((prev) => prev.map((d, i) => (i === index ? { ...d, [field]: value } : d)));
   }
 
-  async function logoutLocked() {
-    await apiFetch(`/api/auth/logout?role=deo`, { method: "POST" }, "deo").catch(() => {});
-    clearLastRole("deo");
-    notifyToast({ icon: "info", title: "Logged out" });
-    router.replace("/login");
-  }
-
-  async function submitUnlockRequest() {
+  async function submitResetRequest() {
     const reason = requestReason.trim();
     if (!reason) return notifyToast({ icon: "error", title: BLANK_FIELD_TITLE, text: BLANK_FIELD_TEXT });
 
-    if (!(await confirmUnlockRequest())) return;
+    if (!(await confirmResetRequest())) return;
 
     setRequestSubmitting(true);
     setRequestError(null);
     try {
       const form = new FormData();
       form.append("reason", reason);
-      await apiFetchForm("/api/deo/request-unlock", form, "deo");
-      setPendingRequest({ requestedAt: new Date().toISOString(), reason });
+      await apiFetchForm("/api/deo/request-reset", form, "deo");
+      setPendingResetRequest({ requestedAt: new Date().toISOString(), reason });
       setRequestFormOpen(false);
       setRequestReason("");
     } catch (err) {
@@ -288,9 +258,14 @@ export default function EntryPage() {
         },
         "deo"
       );
-      clearLastRole("deo");
-      setSubmitted(true);
-      setTimeout(() => router.replace("/login"), 1800);
+      notifyToast({ icon: "success", title: "Submitted / सबमिट हो गया" });
+      setDraft(blankDraft());
+      setRcDetails([]);
+      setRcDetailsTouched(false);
+      setRcTouched(false);
+      setBatteTouched(false);
+      setCourtTouched(false);
+      await loadMine();
     } catch (err) {
       setSubmitError(err instanceof ApiError ? err.message : "Submit failed.");
     } finally {
@@ -305,109 +280,6 @@ export default function EntryPage() {
         <div className="mx-auto w-full max-w-4xl flex-1 px-4 pt-8 pb-24 sm:pb-8">
           <div className="mb-4 h-24 w-full animate-pulse rounded-lg bg-blue-50/50 dark:bg-blue-950/20" />
           <div className="h-[400px] w-full animate-pulse rounded-xl bg-slate-200 dark:bg-slate-800" />
-        </div>
-      </div>
-    );
-  }
-
-  if (submitted) {
-    return (
-      <div className="flex flex-1 items-center justify-center bg-gradient-to-b from-slate-50 to-blue-50 px-4 dark:from-slate-950 dark:to-slate-900">
-        <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-8 text-center shadow-xl shadow-slate-200/60 dark:border-slate-800 dark:bg-slate-900 dark:shadow-none">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900 dark:text-emerald-300">
-            <i className="ti ti-circle-check text-2xl" />
-          </div>
-          <h1 className="mb-1 text-lg font-semibold text-slate-900 dark:text-slate-100">Submitted &amp; Locked</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">Redirecting to login...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (locked) {
-    return (
-      <div className="flex min-h-full flex-1 flex-col bg-slate-50 dark:bg-slate-950">
-        <AppHeader title="DEO Data Entry" role="deo" profile={profile} />
-        <div className="flex flex-1 items-center justify-center px-4 py-12">
-          <div className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-8 text-center shadow-xl shadow-slate-200/60 dark:border-slate-800 dark:bg-slate-900 dark:shadow-none">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-300">
-              <i className="ti ti-lock text-2xl" />
-            </div>
-            <h1 className="mb-2 text-lg font-semibold text-slate-900 dark:text-slate-100">
-              {lockedInfo?.period} — Data Already Locked
-            </h1>
-            <p className="text-sm text-slate-600 dark:text-slate-400">
-              You locked this period&apos;s submission on{" "}
-              <span className="font-medium text-slate-900 dark:text-slate-100">
-                {formatIST(lockedInfo?.lockedAt)} IST
-              </span>
-              .
-            </p>
-            <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-              You cannot make any further changes. If any data was entered incorrectly or needs
-              editing, use <strong>Request Unlock</strong> below to send the Admin / Excise
-              Headquarters your reason directly — you&apos;ll be notified here once it&apos;s reviewed.
-            </p>
-            <p className="mt-3 text-sm text-slate-600 dark:text-slate-400" lang="hi">
-              आपने इस अवधि का डेटा {formatIST(lockedInfo?.lockedAt)} IST को लॉक कर दिया है। अब
-              कोई और बदलाव संभव नहीं है। किसी भी गलत डेटा या संशोधन के लिए नीचे दिए गए{" "}
-              <strong>Request Unlock</strong> बटन से एडमिन / आबकारी मुख्यालय को सीधे अपना कारण
-              भेजें — समीक्षा होने पर आपको यहीं सूचित किया जाएगा।
-            </p>
-            {pendingRequest ? (
-              <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-left dark:border-amber-900 dark:bg-amber-950">
-                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
-                  Request pending since {formatIST(pendingRequest.requestedAt)} IST — awaiting
-                  Admin review.
-                </p>
-                <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">{pendingRequest.reason}</p>
-              </div>
-            ) : requestFormOpen ? (
-              <div className="mt-6 space-y-3 rounded-lg border border-slate-200 p-4 text-left dark:border-slate-800">
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
-                    Reason (Hindi or English) / कारण (हिंदी या अंग्रेज़ी)
-                  </label>
-                  <textarea
-                    value={requestReason}
-                    onChange={(e) => setRequestReason(e.target.value)}
-                    rows={3}
-                    maxLength={2000}
-                    placeholder="Why does this period need to be unlocked?"
-                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                  />
-                </div>
-                {requestError && <p className="text-sm font-bold text-red-600 dark:text-red-400">{requestError}</p>}
-                <div className="flex gap-2">
-                  <Button variant="primary" size="sm" className="flex-1" onClick={submitUnlockRequest} disabled={requestSubmitting}>
-                    {requestSubmitting && <i className="ti ti-loader animate-spin text-sm" />}
-                    {requestSubmitting ? "Submitting..." : "Submit Request"}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      setRequestFormOpen(false);
-                      setRequestReason("");
-                      setRequestError(null);
-                    }}
-                    disabled={requestSubmitting}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <Button variant="dark" size="md" className="mt-6 w-full" onClick={() => setRequestFormOpen(true)}>
-                <i className="ti ti-lock-open text-sm" />
-                Request Unlock
-              </Button>
-            )}
-            <Button variant="secondary" size="md" className="mt-3 w-full" onClick={logoutLocked}>
-              <i className="ti ti-logout text-sm" />
-              Logout
-            </Button>
-          </div>
         </div>
       </div>
     );
@@ -436,6 +308,10 @@ export default function EntryPage() {
               यदि <strong>बट्टे खाते</strong> या <strong>न्यायालय द्वारा स्थगित</strong> राशि 0 से
               अधिक है, तो संबंधित संख्या भी 0 से अधिक होनी चाहिए।
             </p>
+            <p>
+              एक बार सबमिट होने के बाद कोई भी प्रविष्टि संपादित या हटाई नहीं जा सकती — आप जब चाहें
+              एक और अपडेट सबमिट कर सकते हैं।
+            </p>
           </>
         }
       >
@@ -452,6 +328,10 @@ export default function EntryPage() {
         <p>
           If <strong>Batte Khatte</strong> or <strong>Court Stayed</strong> amount is more than
           0, the matching count must be more than 0 too.
+        </p>
+        <p>
+          Once submitted, no entry can be edited or deleted — you can submit another update
+          whenever you like.
         </p>
       </HelpPanel>
       <div className="mx-auto w-full max-w-2xl flex-1 px-4 pt-8 pb-24 sm:pb-8">
@@ -478,7 +358,7 @@ export default function EntryPage() {
             </label>
             <label className="block">
               <span className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
-                2. इस अवधि हेतु प्रारंभिक शेष धनराशि / Opening Balance for this Period
+                2. वर्तमान प्रारंभिक शेष धनराशि / Current Opening Balance
               </span>
               <div className="rounded-md border border-slate-200 bg-slate-100 px-3 py-2.5 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-800 dark:text-slate-300">
                 ₹{openingBalance.toLocaleString("en-IN")}
@@ -668,13 +548,112 @@ export default function EntryPage() {
           <div className="flex gap-2">
             <Button variant="primary" size="lg" className="flex-1" onClick={submitAll} disabled={submitting}>
               {submitting && <i className="ti ti-loader animate-spin text-sm" />}
-              {submitting ? "Submitting..." : "Verify & Lock Record"}
+              {submitting ? "Submitting..." : "Verify & Submit"}
             </Button>
             <Button variant="secondary" size="lg" onClick={clearForm} disabled={submitting}>
               <i className="ti ti-trash text-sm" />
               Clear
             </Button>
           </div>
+        </div>
+
+        {/* Read-only — every entry this DEO has ever submitted is permanent (see HelpPanel above). */}
+        {history.length > 0 && (
+          <div className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <button
+              type="button"
+              onClick={() => setHistoryOpen((v) => !v)}
+              className="flex w-full items-center justify-between gap-2 px-6 py-4 text-left text-sm font-semibold text-slate-800 dark:text-slate-200"
+            >
+              <span className="flex items-center gap-1.5">
+                <i className="ti ti-history text-base text-blue-600 dark:text-blue-400" />
+                My Submissions ({history.length})
+              </span>
+              <i className={`ti text-base ${historyOpen ? "ti-chevron-up" : "ti-chevron-down"}`} />
+            </button>
+            {historyOpen && (
+              <div className="overflow-x-auto border-t border-slate-200 px-6 py-4 dark:border-slate-800">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="text-left text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      <th className="py-1.5 pr-2">Submitted (IST)</th>
+                      <th className="py-1.5 pr-2">Recovered</th>
+                      <th className="py-1.5">Net Recoverable</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map((h) => (
+                      <tr key={h.id} className="border-t border-slate-100 dark:border-slate-800">
+                        <td className="py-1.5 pr-2 text-slate-700 dark:text-slate-300">{formatIST(h.createdAt)}</td>
+                        <td className="py-1.5 pr-2 text-slate-700 dark:text-slate-300">₹{h.recoveredThisPeriod.toLocaleString("en-IN")}</td>
+                        <td className="py-1.5 text-slate-700 dark:text-slate-300">₹{h.netRecoverable.toLocaleString("en-IN")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* A DEO can't edit or delete an entry themselves — this asks the Admin to reset the
+            whole district back to its uploaded baseline instead (see PLAN.md). */}
+        <div className="mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="mb-1 text-sm font-semibold text-slate-800 dark:text-slate-200">
+            Made a mistake? / गलती हो गई?
+          </h2>
+          <p className="mb-4 text-sm text-slate-600 dark:text-slate-400">
+            Entries can&apos;t be edited or deleted here. If your district&apos;s submitted data
+            needs to be reset back to the original baseline, request it below.
+          </p>
+          {pendingResetRequest ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950">
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                Request pending since {formatIST(pendingResetRequest.requestedAt)} IST — awaiting Admin review.
+              </p>
+              <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">{pendingResetRequest.reason}</p>
+            </div>
+          ) : requestFormOpen ? (
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Reason (Hindi or English) / कारण (हिंदी या अंग्रेज़ी)
+                </label>
+                <textarea
+                  value={requestReason}
+                  onChange={(e) => setRequestReason(e.target.value)}
+                  rows={3}
+                  maxLength={2000}
+                  placeholder="Why does this district need to be reset?"
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </div>
+              {requestError && <p className="text-sm font-bold text-red-600 dark:text-red-400">{requestError}</p>}
+              <div className="flex gap-2">
+                <Button variant="primary" size="sm" className="flex-1" onClick={submitResetRequest} disabled={requestSubmitting}>
+                  {requestSubmitting && <i className="ti ti-loader animate-spin text-sm" />}
+                  {requestSubmitting ? "Submitting..." : "Submit Request"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setRequestFormOpen(false);
+                    setRequestReason("");
+                    setRequestError(null);
+                  }}
+                  disabled={requestSubmitting}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button variant="secondary" size="sm" onClick={() => setRequestFormOpen(true)}>
+              <i className="ti ti-refresh text-sm" />
+              Request Reset
+            </Button>
+          )}
         </div>
       </div>
     </div>

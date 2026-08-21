@@ -12,7 +12,7 @@ type AuditEntry = {
 };
 
 // Returns an insertable statement rather than awaiting itself, so callers with an existing
-// db.batch() (e.g. the lock/unlock routes) can fold the audit row into the same atomic batch
+// db.batch() (e.g. the submit/reset routes) can fold the audit row into the same atomic batch
 // instead of a separate round trip.
 export function auditLogInsert(db: ReturnType<typeof getDb>, entry: AuditEntry) {
   return db.insert(auditLog).values({

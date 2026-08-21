@@ -7,7 +7,7 @@ import { DUES_FIELD_ORDER } from "@/lib/dues-row";
 import { formatIST } from "@/lib/format";
 import { getNavDistrictId, onNavDistrictIdChange } from "@/lib/adminNav";
 import { ApiError } from "@/lib/api";
-import { notifyToast, promptUnlockReason } from "@/lib/alerts";
+import { notifyToast, promptResetReason } from "@/lib/alerts";
 import { useAdminData } from "@/lib/useAdminData";
 import AppHeader, { adminNavLinks } from "@/components/ui/AppHeader";
 import Banner from "@/components/ui/Banner";
@@ -23,7 +23,7 @@ function formatValue(field: (typeof DUES_FIELD_ORDER)[number], value: number) {
 // (static export, no server to resolve dynamic paths).
 export default function DistrictDetailPage() {
   const [districtId, setDistrictId] = useState<number | null>(null);
-  const { ready, profile, districts, pacDues, sync, syncing, lastSyncedAt, unlock, error, setError } = useAdminData();
+  const { ready, profile, districts, pacDues, sync, syncing, lastSyncedAt, resetDistrict, error, setError } = useAdminData();
   const navLinks = adminNavLinks(profile?.isOwner);
 
   useEffect(() => {
@@ -32,25 +32,23 @@ export default function DistrictDetailPage() {
   }, []);
 
   const district = districts.find((d) => d.id === districtId);
-  // Every period this district has ever had, most recent first — unlike the reference project's
-  // fixed 5-FY column matrix, this domain can accumulate an arbitrary number of periods over
-  // time. Table layout is transposed from the reference project's too: periods are rows and
-  // fields are columns here (arbitrary-many periods, fixed few fields), the opposite of its
-  // fixed-5-years-as-columns / fields-as-rows shape.
-  const periodRows = useMemo(
-    () => pacDues.filter((p) => p.districtId === districtId).sort((a, b) => (a.period < b.period ? 1 : -1)),
+  // Every entry this district has ever had, most recent first — an append-only ledger, so a
+  // district can accumulate an arbitrary number of entries over time. Table layout: entries are
+  // rows and fields are columns (arbitrary-many entries, fixed few fields).
+  const entryRows = useMemo(
+    () => pacDues.filter((p) => p.districtId === districtId).sort((a, b) => b.id - a.id),
     [pacDues, districtId]
   );
-  const current = periodRows[0];
+  const current = entryRows[0];
 
   // Ported from the reference project's district-detail search (same "match raw or ₹-formatted
-  // value, case-insensitive" logic) — filters which period *rows* here since periods are rows
-  // in this layout, where the reference filters which *fields* are shown (fields are its rows).
+  // value, case-insensitive" logic) — filters which entry *rows* here since entries are rows in
+  // this layout, where the reference filters which *fields* are shown (fields are its rows).
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
-  const visiblePeriodRows = q
-    ? periodRows.filter((row) => {
-        if (row.period.toLowerCase().includes(q)) return true;
+  const visibleEntryRows = q
+    ? entryRows.filter((row) => {
+        if (formatIST(row.createdAt).toLowerCase().includes(q)) return true;
         const moneyValues = [row.openingBalance, row.netRecoverable];
         if (moneyValues.some((v) => String(v).includes(q) || `₹${v.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`.toLowerCase().includes(q))) {
           return true;
@@ -60,16 +58,16 @@ export default function DistrictDetailPage() {
           return String(value).includes(q) || formatValue(field, value).toLowerCase().includes(q);
         });
       })
-    : periodRows;
+    : entryRows;
 
-  async function handleUnlock(id: number, name: string, period: string) {
-    const reason = await promptUnlockReason(name);
+  async function handleReset(id: number, name: string) {
+    const reason = await promptResetReason(name);
     if (!reason) return;
     try {
-      await unlock(id, period, reason);
-      notifyToast({ icon: "success", title: "District unlocked" });
+      await resetDistrict(id, reason);
+      notifyToast({ icon: "success", title: "District reset to baseline" });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Unlock failed.");
+      setError(err instanceof ApiError ? err.message : "Reset failed.");
     }
   }
 
@@ -117,24 +115,18 @@ export default function DistrictDetailPage() {
                       Gross Dues: {district.totalDues !== null ? `₹${district.totalDues.toLocaleString("en-IN")}` : "—"}
                     </span>
                     {current && (
-                      <span
-                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          current.lockStatus === 1
-                            ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
-                            : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                        }`}
-                      >
-                        <i className={`ti ${current.lockStatus === 1 ? "ti-lock" : "ti-lock-open"} text-sm`} />
-                        {current.period} — {current.lockStatus === 1 ? "Locked" : "Unlocked"}
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                        <i className="ti ti-circle-check text-sm" />
+                        Last submitted {formatIST(current.createdAt)} IST
                       </span>
                     )}
-                    {current?.lockStatus === 1 && (
+                    {current && (
                       <button
-                        onClick={() => handleUnlock(district.id, district.districtName, current.period)}
+                        onClick={() => handleReset(district.id, district.districtName)}
                         className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-100 dark:bg-amber-950 dark:text-amber-300 dark:hover:bg-amber-900"
                       >
-                        <i className="ti ti-lock-open text-sm" />
-                        Unlock
+                        <i className="ti ti-refresh text-sm" />
+                        Reset to Baseline
                       </button>
                     )}
                     {district.deoEmail && (
@@ -146,28 +138,14 @@ export default function DistrictDetailPage() {
                   </div>
                 </div>
               </div>
-              {current?.lockStatus === 1 && (
+              {current && (
                 <div className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm dark:border-slate-800 dark:bg-slate-900">
                   <p className="text-slate-500 dark:text-slate-400">
-                    Locked by <span className="font-medium text-slate-800 dark:text-slate-200">{current.submittedByName ?? "—"}</span>
+                    Submitted by <span className="font-medium text-slate-800 dark:text-slate-200">{current.submittedByName ?? "—"}</span>
                   </p>
                   <p className="text-slate-500 dark:text-slate-400">
-                    on <span className="font-medium text-slate-800 dark:text-slate-200">{formatIST(current.lockedAt)}</span> IST
+                    on <span className="font-medium text-slate-800 dark:text-slate-200">{formatIST(current.createdAt)}</span> IST
                   </p>
-                </div>
-              )}
-              {current?.lockStatus === 0 && current.unlockedAt && (
-                <div className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-slate-500 dark:text-slate-400">
-                    Last unlocked by{" "}
-                    <span className="font-medium text-slate-800 dark:text-slate-200">{current.unlockedBy ?? "—"}</span> on{" "}
-                    <span className="font-medium text-slate-800 dark:text-slate-200">{formatIST(current.unlockedAt)}</span> IST
-                  </p>
-                  {current.unlockReason && (
-                    <p className="mt-1 text-slate-500 dark:text-slate-400">
-                      Reason: <span className="font-medium text-slate-800 dark:text-slate-200">{current.unlockReason}</span>
-                    </p>
-                  )}
                 </div>
               )}
             </div>
@@ -175,7 +153,7 @@ export default function DistrictDetailPage() {
             <div className="mb-3">
               <input
                 type="text"
-                placeholder="Search period or amount..."
+                placeholder="Search date or amount..."
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 className="w-full max-w-sm rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
@@ -187,7 +165,7 @@ export default function DistrictDetailPage() {
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-800">
                     <th className="sticky top-0 z-10 whitespace-nowrap bg-slate-50 px-3 py-2.5 text-left font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                      Period
+                      Submitted (IST)
                     </th>
                     <th className="sticky top-0 z-10 whitespace-nowrap bg-slate-50 px-3 py-2.5 text-left font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
                       Opening Balance
@@ -204,27 +182,27 @@ export default function DistrictDetailPage() {
                       Net Recoverable
                     </th>
                     <th className="sticky top-0 z-10 whitespace-nowrap bg-slate-50 px-3 py-2.5 text-left font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                      Status
+                      Submitted By
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {periodRows.length === 0 ? (
+                  {entryRows.length === 0 ? (
                     <tr>
                       <td colSpan={DUES_FIELD_ORDER.length + 3} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">
-                        No periods recorded for this district yet.
+                        No entries recorded for this district yet.
                       </td>
                     </tr>
-                  ) : visiblePeriodRows.length === 0 ? (
+                  ) : visibleEntryRows.length === 0 ? (
                     <tr>
                       <td colSpan={DUES_FIELD_ORDER.length + 3} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">
-                        No periods match &quot;{query}&quot;.
+                        No entries match &quot;{query}&quot;.
                       </td>
                     </tr>
                   ) : (
-                    visiblePeriodRows.map((row) => (
+                    visibleEntryRows.map((row) => (
                       <tr key={row.id} className="border-t border-slate-100 bg-white dark:border-slate-800 dark:bg-slate-900">
-                        <td className="whitespace-nowrap px-3 py-2.5 font-medium text-slate-700 dark:text-slate-300">{row.period}</td>
+                        <td className="whitespace-nowrap px-3 py-2.5 font-medium text-slate-700 dark:text-slate-300">{formatIST(row.createdAt)}</td>
                         <td className="whitespace-nowrap px-3 py-2.5 text-slate-800 dark:text-slate-200">
                           ₹{row.openingBalance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                         </td>
@@ -236,17 +214,7 @@ export default function DistrictDetailPage() {
                         <td className="whitespace-nowrap px-3 py-2.5 text-slate-800 dark:text-slate-200">
                           ₹{row.netRecoverable.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                         </td>
-                        <td className="whitespace-nowrap px-3 py-2.5">
-                          <span
-                            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                              row.lockStatus === 1
-                                ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
-                                : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                            }`}
-                          >
-                            {row.lockStatus === 1 ? "Locked" : "Unlocked"}
-                          </span>
-                        </td>
+                        <td className="whitespace-nowrap px-3 py-2.5 text-slate-800 dark:text-slate-200">{row.submittedByName ?? "—"}</td>
                       </tr>
                     ))
                   )}

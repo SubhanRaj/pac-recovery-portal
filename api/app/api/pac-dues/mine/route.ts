@@ -5,10 +5,9 @@ import { pacDues, districts } from "@/db/schema";
 import { requireSession } from "@/lib/auth-guard";
 import { withErrorHandling } from "@/lib/with-error-handling";
 
-// Lets a DEO re-fetch their district's current period, including the read-only totalDues/
-// collectedTillDate baseline — needed both on first load and once an Admin unlocks a period so
-// the form can be re-populated. Single row, not a years[] array like the reference project's
-// /api/pac-data/mine, since this domain has no multi-FY loop.
+// Lets a DEO re-fetch their district's baseline plus every ledger entry they've ever submitted
+// (newest first) — "current" is just history[0]. The full history is returned so the DEO can
+// view (read-only) everything they've submitted, per the "cannot be changed, can be viewed" rule.
 export const GET = withErrorHandling("pac-dues/mine", async (req: NextRequest) => {
   const session = await requireSession(req, "deo");
   if (!session || !session.districtId) {
@@ -23,16 +22,16 @@ export const GET = withErrorHandling("pac-dues/mine", async (req: NextRequest) =
     .where(eq(districts.id, session.districtId))
     .limit(1);
 
-  const [current] = await db
+  const history = await db
     .select()
     .from(pacDues)
     .where(eq(pacDues.districtId, session.districtId))
-    .orderBy(desc(pacDues.period))
-    .limit(1);
+    .orderBy(desc(pacDues.id));
 
   return NextResponse.json({
     totalDues: district?.totalDues ?? null,
     collectedTillDate: district?.collectedTillDate ?? null,
-    current: current ?? null,
+    current: history[0] ?? null,
+    history,
   });
 });

@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { requireSession, isOwnerEmail } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
-import { users, districts, pacDues, unlockRequests } from "@/db/schema";
+import { users, districts, unlockRequests } from "@/db/schema";
 import { withErrorHandling } from "@/lib/with-error-handling";
 
 // The frontend calls this on load to learn role/districtId and gate routes — see lib/session.ts
 // for why there are two separate cookies instead of one shared __session.
 //
-// Differs from the reference project structurally: lock state isn't a lifetime-once flag on
-// districts/users here — it's per (district, period) on pac_dues, so "current period" for a
-// DEO is just their district's most recent pac_dues row (by period desc). No "Open Next Period"
-// mechanic exists yet, so today that's just the one row the legacy-data migration seeded.
+// A DEO is never locked out here — pac_dues is an append-only ledger (see PLAN.md), so this only
+// surfaces whether the DEO has a pending district-reset request, not a lock/period state.
 //
 // isOwner mirrors the reference project's OWNER_EMAIL-secret pattern (not a DB column) — only
 // the admin whose email matches the OWNER_EMAIL secret sees/uses /admin/users, so ordinary
@@ -40,42 +38,15 @@ export const GET = withErrorHandling("auth/me", async (req: NextRequest) => {
     .where(eq(users.id, session.userId))
     .limit(1);
 
-  let currentPeriod: {
-    period: string;
-    lockStatus: number;
-    lockedAt: string | null;
-    submittedByName: string | null;
-  } | null = null;
-  let pendingUnlockRequest: { requestedAt: string; reason: string } | null = null;
+  let pendingResetRequest: { requestedAt: string; reason: string } | null = null;
 
   if (role === "deo" && session.districtId) {
-    const [latest] = await db
-      .select({
-        period: pacDues.period,
-        lockStatus: pacDues.lockStatus,
-        lockedAt: pacDues.lockedAt,
-        submittedByName: pacDues.submittedByName,
-      })
-      .from(pacDues)
-      .where(eq(pacDues.districtId, session.districtId))
-      .orderBy(desc(pacDues.period))
+    const [pending] = await db
+      .select({ requestedAt: unlockRequests.requestedAt, reason: unlockRequests.reason })
+      .from(unlockRequests)
+      .where(and(eq(unlockRequests.districtId, session.districtId), eq(unlockRequests.status, "pending")))
       .limit(1);
-    currentPeriod = latest ?? null;
-
-    if (currentPeriod) {
-      const [pending] = await db
-        .select({ requestedAt: unlockRequests.requestedAt, reason: unlockRequests.reason })
-        .from(unlockRequests)
-        .where(
-          and(
-            eq(unlockRequests.districtId, session.districtId),
-            eq(unlockRequests.period, currentPeriod.period),
-            eq(unlockRequests.status, "pending")
-          )
-        )
-        .limit(1);
-      pendingUnlockRequest = pending ?? null;
-    }
+    pendingResetRequest = pending ?? null;
   }
 
   const isOwner = role === "admin" && isOwnerEmail(row?.email);
@@ -87,7 +58,6 @@ export const GET = withErrorHandling("auth/me", async (req: NextRequest) => {
     designation: row?.designation ?? null,
     districtName: row?.districtName ?? null,
     isOwner,
-    currentPeriod,
-    pendingUnlockRequest,
+    pendingResetRequest,
   });
 });

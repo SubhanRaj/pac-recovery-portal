@@ -10,16 +10,15 @@ function formatMoney(value: number) {
   return `₹${value.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
 }
 
-// Green = Locked, red = Unlocked — inverted from the usual "red is bad" reading, because this
-// portal's whole goal is 100% of districts *locked* for the current period; an unlocked
-// district is the one still needing attention, so it gets the red. Matches KPI_COLORS' Locked/
-// Unlocked card colors below — keep both in sync if this ever changes.
-const LOCKED_COLOR = "#10b981";
-const UNLOCKED_COLOR = "#ef4444";
+// Green = has at least one submitted entry, red = no submissions yet — the district still
+// needing attention gets the red. Matches KPI_COLORS' Submitted/Not Started card colors below —
+// keep both in sync if this ever changes.
+const SUBMITTED_COLOR = "#10b981";
+const NOT_STARTED_COLOR = "#ef4444";
 
 // Chart.js loads from a CDN <script lazyOnload> (layout.tsx), so it may not be on
 // `window` the instant this mounts — poll briefly instead of assuming it's ready.
-function LockStatusDonut({ locked, unlocked }: { locked: number; unlocked: number }) {
+function SubmissionStatusDonut({ submitted, notStarted }: { submitted: number; notStarted: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const chartRef = useRef<Chart | null>(null);
 
@@ -33,8 +32,8 @@ function LockStatusDonut({ locked, unlocked }: { locked: number; unlocked: numbe
       chartRef.current = new window.Chart(canvasRef.current, {
         type: "doughnut",
         data: {
-          labels: ["Locked", "Unlocked"],
-          datasets: [{ data: [locked, unlocked], backgroundColor: [LOCKED_COLOR, UNLOCKED_COLOR], borderWidth: 0 }],
+          labels: ["Submitted", "Not Started"],
+          datasets: [{ data: [submitted, notStarted], backgroundColor: [SUBMITTED_COLOR, NOT_STARTED_COLOR], borderWidth: 0 }],
         },
         options: {
           plugins: { legend: { display: false } },
@@ -60,7 +59,7 @@ function LockStatusDonut({ locked, unlocked }: { locked: number; unlocked: numbe
       if (poll) clearInterval(poll);
       chartRef.current?.destroy();
     };
-  }, [locked, unlocked]);
+  }, [submitted, notStarted]);
 
   return (
     <div className="relative h-44 w-44 shrink-0">
@@ -216,8 +215,8 @@ function KpiCard({
 export default function AdminDashboard({ rows }: { rows: Row[] }) {
   const router = useRouter();
   const totalDistricts = rows.length;
-  const locked = rows.filter((r) => r.lockStatus === 1).length;
-  const unlocked = totalDistricts - locked;
+  const submitted = rows.filter((r) => r.hasSubmissions).length;
+  const notStarted = totalDistricts - submitted;
 
   const sums = Object.fromEntries(
     DUES_FIELD_ORDER.map((field) => [field, rows.reduce((sum, r) => sum + r[field], 0)])
@@ -234,22 +233,22 @@ export default function AdminDashboard({ rows }: { rows: Row[] }) {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <KpiCard label="Districts" value={String(totalDistricts)} icon="ti-map-pin" color="blue" href="/admin/districts" />
         <KpiCard
-          label="Locked"
-          value={String(locked)}
-          icon="ti-lock"
+          label="Submitted"
+          value={String(submitted)}
+          icon="ti-circle-check"
           color="emerald"
           onClick={() => {
-            setNavStatusFilter("locked");
+            setNavStatusFilter("submitted");
             router.push("/admin/districts");
           }}
         />
         <KpiCard
-          label="Unlocked"
-          value={String(unlocked)}
-          icon="ti-lock-open"
+          label="Not Started"
+          value={String(notStarted)}
+          icon="ti-circle-dashed"
           color="red"
           onClick={() => {
-            setNavStatusFilter("unlocked");
+            setNavStatusFilter("notStarted");
             router.push("/admin/districts");
           }}
         />
@@ -274,23 +273,23 @@ export default function AdminDashboard({ rows }: { rows: Row[] }) {
         </div>
 
         <div className="rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-300">Lock status (current period)</h3>
+          <h3 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-300">Submission status</h3>
           <div className="flex flex-col items-center gap-4 sm:flex-row sm:gap-6">
-            <LockStatusDonut locked={locked} unlocked={unlocked} />
+            <SubmissionStatusDonut submitted={submitted} notStarted={notStarted} />
             <div className="w-full min-w-0 flex-1">
               <div className="flex h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-                <div className="bg-emerald-500" style={{ width: `${(locked / Math.max(1, totalDistricts)) * 100}%` }} />
+                <div className="bg-emerald-500" style={{ width: `${(submitted / Math.max(1, totalDistricts)) * 100}%` }} />
                 <div
                   className="bg-red-500"
-                  style={{ width: `${(unlocked / Math.max(1, totalDistricts)) * 100}%` }}
+                  style={{ width: `${(notStarted / Math.max(1, totalDistricts)) * 100}%` }}
                 />
               </div>
               <div className="mt-3 flex gap-5 text-xs text-slate-600 dark:text-slate-400">
                 <span className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500" /> Locked ({locked})
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" /> Submitted ({submitted})
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-red-500" /> Unlocked ({unlocked})
+                  <span className="h-2 w-2 rounded-full bg-red-500" /> Not Started ({notStarted})
                 </span>
               </div>
             </div>

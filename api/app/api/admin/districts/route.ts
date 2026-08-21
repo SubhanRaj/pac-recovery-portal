@@ -5,10 +5,8 @@ import { eq } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guard";
 import { withErrorHandling } from "@/lib/with-error-handling";
 
-// Full dump of all 75 districts + their pac_dues rows (every period, not just the latest), for
-// the Admin dashboard's Dexie.js cache/sync — same shape/purpose as the reference project's
-// /api/admin/districts, just without districts.lockStatus/unlockedAt (lock lives on pac_dues
-// per period here, see pac-recovery-migration-plan.md §3).
+// Full dump of all 75 districts + every pac_dues ledger entry (not just the latest per
+// district), for the Admin dashboard's Dexie.js cache/sync (see PLAN.md).
 export const GET = withErrorHandling("admin/districts", async (req: NextRequest) => {
   const session = await requireSession(req, "admin");
   if (!session || session.role !== "admin") {

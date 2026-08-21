@@ -28,7 +28,7 @@ export function onNavDistrictIdChange(cb: (id: number) => void): () => void {
   return () => window.removeEventListener(NAV_DISTRICT_EVENT, handler);
 }
 
-export type StatusFilter = "locked" | "unlocked";
+export type StatusFilter = "submitted" | "notStarted";
 
 export function setNavStatusFilter(status: StatusFilter) {
   sessionStorage.setItem(STATUS_FILTER_KEY, status);
@@ -40,5 +40,5 @@ export function setNavStatusFilter(status: StatusFilter) {
 export function consumeNavStatusFilter(): StatusFilter | null {
   const v = sessionStorage.getItem(STATUS_FILTER_KEY);
   if (v) sessionStorage.removeItem(STATUS_FILTER_KEY);
-  return v === "locked" || v === "unlocked" ? v : null;
+  return v === "submitted" || v === "notStarted" ? v : null;
 }

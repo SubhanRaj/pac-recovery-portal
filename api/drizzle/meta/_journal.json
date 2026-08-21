@@ -15,6 +15,13 @@
       "when": 1785604481723,
       "tag": "0001_lyrical_nova",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787302770810,
+      "tag": "0002_brief_red_skull",
+      "breakpoints": true
     }
   ]
 }

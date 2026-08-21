@@ -22,17 +22,22 @@ change.** This project has live production data and real government users.
 Auth to Cloudflare: `pnpm exec wrangler whoami` (already logged in via OAuth on this machine).
 Re-auth elsewhere with `pnpm exec wrangler login`.
 
-### Pre-filled recovery figures (test data, not a real lock)
+### Pre-filled recovery figures (test data, pre-dates the ledger redesign)
 
 The 59 districts that had a prior bakaya form period carry real recovery figures
 (`recovered_this_period`, `batte_khatte_*`, `court_stayed_amount`, `net_recoverable`) pulled from
 that old system's own report export — the source file is
 `scripts_and_data/Excise_Bakaya_Report_02-07-2026_12-39-31.xlsx`, backed up alongside a pre-import
-D1 snapshot in `scripts_and_data/backups/`. These rows are deliberately left **unlocked** with no
-`submitted_by_name` — nobody has actually submitted through this portal, so a DEO logging in today
-sees real historical numbers pre-filled but must still review and lock the period themselves for
-it to count as a genuine submission. The real Excel re-baseline (`districts.totalDues`/
-`collectedTillDate`, up to 31-Mar-2019) supersedes this once it's imported.
+D1 snapshot in `scripts_and_data/backups/`. **Caution**: these rows were inserted with
+`submitted_by_name = NULL` and were meant to be reviewed and re-submitted by a real DEO before
+counting as genuine (see the old `lockStatus` model this repo used to have) — but
+[PLAN.md](./PLAN.md)'s append-only ledger redesign removed that "unconfirmed draft" concept
+entirely, so as of that change these 59 rows now sit in each district's ledger indistinguishable
+from a real DEO submission (just with a blank Submitted By). Flagged, not yet resolved — decide
+whether to clear them (via `POST /api/admin/reset-district`, per district) before a real DEO
+starts submitting against one of these 59, or accept them as the starting entry. The real Excel
+re-baseline (`districts.totalDues`/`collectedTillDate`, up to 31-Mar-2019) supersedes the
+pre-filled figures either way once it's imported.
 
 ## CI/CD
 

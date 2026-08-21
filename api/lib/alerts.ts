@@ -8,12 +8,12 @@ export async function confirmFinalSubmit(): Promise<boolean> {
     icon: "warning",
     title: "Are you sure?",
     html:
-      "Please verify every field is correct before continuing. Once locked, this submission " +
-      "<strong>cannot be edited</strong> — any correction after this point requires contacting " +
-      "the Admin / Excise Headquarters." +
+      "Please verify every field is correct before continuing. Once submitted, this entry " +
+      "<strong>cannot be edited or deleted</strong> — you can always submit a further update " +
+      "later, but this entry itself is permanent." +
       '<br><br><span lang="hi">कृपया आगे बढ़ने से पहले सुनिश्चित करें कि सभी जानकारी सही है। ' +
-      "एक बार लॉक होने के बाद इसे <strong>संपादित नहीं किया जा सकता</strong> — किसी भी सुधार के लिए " +
-      "एडमिन / आबकारी मुख्यालय से संपर्क करना होगा।</span>",
+      "एक बार सबमिट होने के बाद इसे <strong>संपादित या हटाया नहीं जा सकता</strong> — आप बाद में एक और " +
+      "अपडेट सबमिट कर सकते हैं, लेकिन यह प्रविष्टि स्थायी है।</span>",
     showCancelButton: true,
     confirmButtonText: "Yes, data is correct",
     cancelButtonText: "Let me check again",
@@ -48,26 +48,26 @@ function validateDeoName(value: string): string | undefined {
   return undefined;
 }
 
-// Second step of the lock flow (after confirmFinalSubmit): a SweetAlert2 text-input dialog,
+// Second step of the submit flow (after confirmFinalSubmit): a SweetAlert2 text-input dialog,
 // modeled on the sibling excise-bakaya-record project's "Verify & Lock Record" prompt — same
 // small-scale pattern (Swal.fire({ input: "text", inputValidator }) instead of a custom form),
 // with a liability disclaimer added and a stricter validator (that project only checked for
 // non-empty). Returns the trimmed name, or null if the DEO cancelled.
 export async function promptDeoNameAndLock(): Promise<string | null> {
   const result = await window.Swal.fire({
-    title: "Verify & Lock",
+    title: "Verify & Submit",
     html:
       "Enter the full name of the District Excise Officer confirming this submission. " +
-      "By locking, you confirm the data is accurate — <strong>any incorrect data or error is " +
+      "By submitting, you confirm the data is accurate — <strong>any incorrect data or error is " +
       "the submitting DEO's individual responsibility</strong>, who will be personally liable " +
       "for it." +
       '<br><br><span lang="hi">इस सबमिशन की पुष्टि करने वाले जिला आबकारी अधिकारी का पूरा नाम दर्ज करें। ' +
-      "लॉक करने पर, आप पुष्टि करते हैं कि डेटा सही है — <strong>किसी भी गलत डेटा या त्रुटि की जिम्मेदारी " +
+      "सबमिट करने पर, आप पुष्टि करते हैं कि डेटा सही है — <strong>किसी भी गलत डेटा या त्रुटि की जिम्मेदारी " +
       "व्यक्तिगत रूप से संबंधित डीईओ की होगी</strong>, जो इसके लिए व्यक्तिगत रूप से उत्तरदायी होंगे।</span>",
     input: "text",
     inputPlaceholder: "Full Name (English)",
     showCancelButton: true,
-    confirmButtonText: "Lock Submission",
+    confirmButtonText: "Submit Entry",
     cancelButtonText: "Cancel",
     confirmButtonColor: "#dc2626",
     allowOutsideClick: false,
@@ -89,39 +89,41 @@ export async function confirmLogout(): Promise<boolean> {
   return result.isConfirmed;
 }
 
-// Admin unlocking a district: a confirm + reason prompt, same shape as the DEO's lock flow
-// above (blocking, since this reopens a submission the DEO already finalized) — the reason is
-// stored server-side (districts.unlock_reason) as an audit trail for why a locked submission
-// was reopened. Returns the trimmed reason, or null if the admin cancelled.
-export async function promptUnlockReason(districtName: string): Promise<string | null> {
+// Admin resetting a district: a confirm + reason prompt, same shape as the DEO's submit flow
+// above (blocking, since this permanently wipes every entry the DEO has ever submitted for the
+// district) — the reason is stored server-side in audit_log as why the reset happened. The
+// wiped entries themselves are preserved in that same audit_log row's metadata (see PLAN.md),
+// not truly destroyed, but the district's active ledger goes back to empty. Returns the trimmed
+// reason, or null if the admin cancelled.
+export async function promptResetReason(districtName: string): Promise<string | null> {
   const result = await window.Swal.fire({
     icon: "warning",
-    title: `Unlock ${districtName}?`,
+    title: `Reset ${districtName} to baseline?`,
     html:
-      "This lets the District Excise Officer re-edit data they already submitted and locked. " +
-      "Please record why this district is being unlocked." +
-      '<br><br><span lang="hi">इससे जिला आबकारी अधिकारी अपने द्वारा पहले से जमा और लॉक किए गए ' +
-      "डेटा को फिर से संपादित कर सकेंगे। कृपया दर्ज करें कि इस जिले को अनलॉक क्यों किया जा रहा है।</span>",
+      "This permanently clears every recovery entry this district has ever submitted, back to " +
+      "the originally uploaded baseline — the District Excise Officer will start fresh. This " +
+      "cannot be undone from the app (the wiped entries are only preserved in the audit log). " +
+      "Please record why this district is being reset." +
+      '<br><br><span lang="hi">इससे इस जिले द्वारा अब तक सबमिट की गई सभी वसूली प्रविष्टियाँ स्थायी रूप ' +
+      "से मिट जाएंगी और मूल अपलोड किए गए बेसलाइन पर वापस आ जाएंगी — जिला आबकारी अधिकारी को फिर से शुरू " +
+      "करना होगा। यह ऐप से पूर्ववत नहीं किया जा सकता। कृपया दर्ज करें कि इस जिले को रीसेट क्यों किया जा " +
+      "रहा है।</span>",
     input: "textarea",
-    inputPlaceholder: "Reason for unlocking (required)",
+    inputPlaceholder: "Reason for resetting (required)",
     showCancelButton: true,
-    confirmButtonText: "Unlock",
+    confirmButtonText: "Reset",
     cancelButtonText: "Cancel",
     confirmButtonColor: "#dc2626",
     allowOutsideClick: false,
     inputValidator: (value: string) =>
-      value && value.trim()
-        ? undefined
-        : "Please enter a reason for unlocking. / कृपया अनलॉक करने का कारण दर्ज करें।",
+      value && value.trim() ? undefined : "Please enter a reason for resetting. / कृपया रीसेट करने का कारण दर्ज करें।",
   });
   return result.isConfirmed ? (result.value as string).trim() : null;
 }
 
-// Only reachable pre-lock (the button that calls this disappears once the period is
-// submitted/locked, since submitAll() redirects away from this page) — clears only this
-// component's in-memory React state, nothing server-side, no Dexie draft to restore (this
-// domain's single-period form has no multi-step draft, unlike the reference project's 5-year
-// wizard).
+// Clears only this component's in-memory React state, nothing server-side — no Dexie draft to
+// restore (this domain's form has no multi-step draft, unlike the reference project's 5-year
+// wizard). The form stays reachable after every submit (no lock), so this button is always live.
 export async function confirmClearForm(): Promise<boolean> {
   const result = await window.Swal.fire({
     icon: "warning",
@@ -138,17 +140,19 @@ export async function confirmClearForm(): Promise<boolean> {
   return result.isConfirmed;
 }
 
-// Before a DEO's unlock request actually goes out — a blocking confirm since it notifies the
+// Before a DEO's reset request actually goes out — a blocking confirm since it notifies the
 // Admin and can't be un-sent once submitted (only cancelled by the Admin resolving it).
-export async function confirmUnlockRequest(): Promise<boolean> {
+export async function confirmResetRequest(): Promise<boolean> {
   const result = await window.Swal.fire({
     icon: "question",
-    title: "Submit unlock request?",
+    title: "Submit reset request?",
     html:
-      "This sends your reason to the Admin / Excise Headquarters for review. You'll see the " +
-      "status here once it's approved or denied." +
-      '<br><br><span lang="hi">इससे आपका कारण एडमिन / आबकारी मुख्यालय को समीक्षा के लिए भेजा ' +
-      "जाएगा। स्वीकृत या अस्वीकृत होने पर स्थिति यहीं दिखाई देगी।</span>",
+      "This asks the Admin / Excise Headquarters to wipe every entry this district has ever " +
+      "submitted, back to the uploaded baseline. You'll see the status here once it's approved " +
+      "or denied." +
+      '<br><br><span lang="hi">इससे एडमिन / आबकारी मुख्यालय से इस जिले द्वारा अब तक सबमिट की गई सभी ' +
+      "प्रविष्टियों को मूल बेसलाइन पर वापस लाने का अनुरोध किया जाएगा। स्वीकृत या अस्वीकृत होने पर " +
+      "स्थिति यहीं दिखाई देगी।</span>",
     showCancelButton: true,
     confirmButtonText: "Yes, submit request",
     cancelButtonText: "Cancel",
@@ -158,7 +162,7 @@ export async function confirmUnlockRequest(): Promise<boolean> {
 }
 
 // Same "blocking confirm before an irreversible/session-ending action" pattern as
-// confirmClearForm()/confirmUnlockRequest() above — add/edit go through AdminUserDrawer instead
+// confirmClearForm()/confirmResetRequest() above — add/edit go through AdminUserDrawer instead
 // (ported from the sibling excise-revenue-recovery-portal), a routine form action, not a
 // SweetAlert2 popup, per CLAUDE.md's "don't add a new blocking modal for a routine validation
 // message" UI convention. Delete is the one irreversible step here, so it stays a Swal confirm.

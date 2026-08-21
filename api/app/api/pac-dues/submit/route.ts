@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { pacDues, districts } from "@/db/schema";
 import { requireSession } from "@/lib/auth-guard";
@@ -29,8 +29,9 @@ const NUMERIC_FIELDS = [
   "courtStayedAmount",
 ] as const;
 
-// One period per submit, not a 5-FY loop — see pac-recovery-migration-plan.md §3. No "Open Next
-// Period" mechanic yet, so this always operates on the district's single latest pac_dues row.
+// Always inserts a new immutable ledger entry — never updates or locks an existing row (see
+// PLAN.md). A DEO can call this any number of times; openingBalance chains from whatever the
+// district's latest entry currently is (or the uploaded baseline if this is the first entry).
 export const POST = withErrorHandling("pac-dues/submit", async (req: NextRequest) => {
   const session = await requireSession(req, "deo");
   if (!session || !session.districtId) {
@@ -68,24 +69,22 @@ export const POST = withErrorHandling("pac-dues/submit", async (req: NextRequest
     return NextResponse.json({ error: "District not found" }, { status: 404 });
   }
 
-  const [current] = await db
+  const [latest] = await db
     .select()
     .from(pacDues)
     .where(eq(pacDues.districtId, session.districtId))
-    .orderBy(desc(pacDues.period))
+    .orderBy(desc(pacDues.id))
     .limit(1);
 
-  if (!current) {
-    return NextResponse.json({ error: "No open recovery period for this district" }, { status: 404 });
+  if (!latest && (district.totalDues === null || district.collectedTillDate === null)) {
+    return NextResponse.json({ error: "District baseline dues have not been uploaded yet" }, { status: 404 });
   }
-  if (current.lockStatus === 1) {
-    return NextResponse.json({ error: "This period is already locked" }, { status: 409 });
-  }
+  const openingBalance = latest ? latest.netRecoverable : district.totalDues! - district.collectedTillDate!;
 
   // Server-computed only, never trusted from the client — mirrors this repo's original
   // Calculation Logic (README.md).
   const { duesLeft, netRecoverable } = computeNetRecoverable(
-    current.openingBalance,
+    openingBalance,
     body.recoveredThisPeriod,
     body.batteKhatteAmount,
     body.courtStayedAmount
@@ -103,32 +102,28 @@ export const POST = withErrorHandling("pac-dues/submit", async (req: NextRequest
     );
   }
 
-  const now = new Date().toISOString();
   const submittedByName = body.submittedByName.trim();
 
   await db.batch([
-    db
-      .update(pacDues)
-      .set({
-        rcCount: body.rcCount,
-        rcAmount: body.rcAmount,
-        rcDetails: JSON.stringify(body.rcDetails),
-        recoveredThisPeriod: body.recoveredThisPeriod,
-        batteKhatteCount: body.batteKhatteCount,
-        batteKhatteAmount: body.batteKhatteAmount,
-        courtCaseCount: body.courtCaseCount,
-        courtStayedAmount: body.courtStayedAmount,
-        netRecoverable,
-        lockStatus: 1,
-        lockedAt: now,
-        submittedByName,
-      })
-      .where(and(eq(pacDues.id, current.id))),
+    db.insert(pacDues).values({
+      districtId: session.districtId,
+      openingBalance,
+      rcCount: body.rcCount,
+      rcAmount: body.rcAmount,
+      rcDetails: JSON.stringify(body.rcDetails),
+      recoveredThisPeriod: body.recoveredThisPeriod,
+      batteKhatteCount: body.batteKhatteCount,
+      batteKhatteAmount: body.batteKhatteAmount,
+      courtCaseCount: body.courtCaseCount,
+      courtStayedAmount: body.courtStayedAmount,
+      netRecoverable,
+      submittedByName,
+    }),
     auditLogInsert(db, {
-      eventType: "district_locked",
+      eventType: "recovery_entry_submitted",
       actorRole: "deo",
       districtName: district.districtName,
-      metadata: { period: current.period, submittedByName },
+      metadata: { submittedByName, recoveredThisPeriod: body.recoveredThisPeriod, netRecoverable },
     }),
   ] as unknown as Parameters<typeof db.batch>[0]);
 

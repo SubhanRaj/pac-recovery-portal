@@ -17,7 +17,6 @@ export const GET = withErrorHandling("admin/unlock-requests", async (req: NextRe
       id: unlockRequests.id,
       districtId: unlockRequests.districtId,
       districtName: districts.districtName,
-      period: unlockRequests.period,
       reason: unlockRequests.reason,
       status: unlockRequests.status,
       requestedAt: unlockRequests.requestedAt,

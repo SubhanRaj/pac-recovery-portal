@@ -18,7 +18,7 @@ export type Row = CachedDistrict &
   Record<DuesField, number> & {
     openingBalance: number;
     netRecoverable: number;
-    lockStatus: number;
-    period: string | null;
+    hasSubmissions: boolean;
+    lastSubmittedAt: string | null;
     rcDetails?: string;
   };

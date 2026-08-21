@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { districts, pacDues, unlockRequests, users } from "@/db/schema";
 import { requireSession } from "@/lib/auth-guard";
@@ -29,7 +29,6 @@ export const POST = withErrorHandling("admin/unlock-requests/resolve", async (re
     .select({
       id: unlockRequests.id,
       districtId: unlockRequests.districtId,
-      period: unlockRequests.period,
       status: unlockRequests.status,
     })
     .from(unlockRequests)
@@ -57,27 +56,24 @@ export const POST = withErrorHandling("admin/unlock-requests/resolve", async (re
 
   const resolvedAt = new Date().toISOString();
   const resolvedByDisplay = admin?.name ?? admin?.email ?? null;
+  // Approving performs the same full reset as POST /api/admin/reset-district — deletes every
+  // pac_dues row for the district, preserving what was deleted in this event's audit metadata
+  // (see PLAN.md) — never a field-level edit.
+  const priorEntries = action === "approve" ? await db.select().from(pacDues).where(eq(pacDues.districtId, request.districtId)) : [];
   const statements = [
     db
       .update(unlockRequests)
       .set({ status: action === "approve" ? "approved" : "denied", resolvedAt, resolvedBy: resolvedByDisplay, adminNote: trimmedNote })
       .where(eq(unlockRequests.id, id)),
-    ...(action === "approve"
-      ? [
-          db
-            .update(pacDues)
-            .set({ lockStatus: 0, unlockedAt: resolvedAt, unlockReason: trimmedNote, unlockedBy: resolvedByDisplay })
-            .where(and(eq(pacDues.districtId, request.districtId), eq(pacDues.period, request.period))),
-        ]
-      : []),
+    ...(action === "approve" ? [db.delete(pacDues).where(eq(pacDues.districtId, request.districtId))] : []),
     auditLogInsert(db, {
-      eventType: action === "approve" ? "unlock_request_approved" : "unlock_request_denied",
+      eventType: action === "approve" ? "reset_request_approved" : "reset_request_denied",
       actorRole: "admin",
       actorEmail: admin?.email,
       actorName: admin?.name,
       actorDesignation: admin?.designation,
       districtName: district?.districtName,
-      metadata: { period: request.period, note: trimmedNote },
+      metadata: action === "approve" ? { note: trimmedNote, priorEntries } : { note: trimmedNote },
     }),
   ];
 

@@ -69,17 +69,16 @@ async function downloadWorkbook(wb: InstanceType<typeof window.ExcelJS.Workbook>
   URL.revokeObjectURL(url);
 }
 
-// One workbook: a Summary cover sheet, a Districts sheet (every district's latest period, one
-// row each), and a Lock Status sheet — much flatter than the reference project's per-FY sheets
-// since this domain has one period per district, not a 5-year loop (see
-// pac-recovery-migration-plan.md §3). `pacDues` here is every period row cached client-side;
-// callers pass the district's *latest* period per row for "current" figures.
+// One workbook: a Summary cover sheet, a Districts sheet (every district's latest ledger entry,
+// one row each), and a Submission Status sheet. `pacDues` here is every ledger entry cached
+// client-side (a district can have arbitrarily many); callers pass the district's *latest* entry
+// per row for "current" figures.
 export async function exportDistrictsToXlsx(districts: CachedDistrict[], pacDues: CachedPacDues[]) {
   const sortedDistricts = [...districts].sort((a, b) => a.districtName.localeCompare(b.districtName));
   const latestByDistrict = new Map<number, CachedPacDues>();
   for (const p of pacDues) {
     const existing = latestByDistrict.get(p.districtId);
-    if (!existing || p.period > existing.period) latestByDistrict.set(p.districtId, p);
+    if (!existing || p.id > existing.id) latestByDistrict.set(p.districtId, p);
   }
 
   const header = [
@@ -89,7 +88,7 @@ export async function exportDistrictsToXlsx(districts: CachedDistrict[], pacDues
     ...DUES_FIELD_ORDER.map((f) => englishLabel(DUES_FIELD_LABELS[f])),
     englishLabel(DUES_LEFT_LABEL),
     englishLabel(NET_RECOVERABLE_LABEL),
-    "Period",
+    "Last Submitted (IST)",
   ];
   const moneyCols0 = [1, 2, ...DUES_FIELD_ORDER.map((f, i) => ((MONEY_FIELDS as readonly string[]).includes(f) ? i + 3 : -1)).filter((c) => c >= 0), header.length - 3];
 
@@ -105,7 +104,7 @@ export async function exportDistrictsToXlsx(districts: CachedDistrict[], pacDues
     totalRecovered += p?.recoveredThisPeriod ?? 0;
     totalNetRecoverable += p?.netRecoverable ?? 0;
   }
-  const lockedCount = sortedDistricts.filter((d) => latestByDistrict.get(d.id)?.lockStatus === 1).length;
+  const submittedCount = sortedDistricts.filter((d) => latestByDistrict.has(d.id)).length;
 
   const summaryWs = wb.addWorksheet("Summary", { pageSetup: PAGE_SETUP });
   summaryWs.columns = [{ width: 32 }, { width: 40 }];
@@ -115,10 +114,10 @@ export async function exportDistrictsToXlsx(districts: CachedDistrict[], pacDues
   summaryWs.addRow([]);
   const summaryHeaderRow = summaryWs.addRow(["Metric", "Value"]);
   summaryWs.addRow(["Total Districts", districts.length]);
-  summaryWs.addRow(["Locked (Current Period)", lockedCount]);
-  summaryWs.addRow(["Unlocked (Current Period)", districts.length - lockedCount]);
+  summaryWs.addRow(["Submitted (at least one entry)", submittedCount]);
+  summaryWs.addRow(["Not Started", districts.length - submittedCount]);
   const duesRow = summaryWs.addRow(["Total Gross Dues (as on 31-Mar-2019)", totalDues]);
-  const recoveredRow = summaryWs.addRow(["Total Recovered (current period)", totalRecovered]);
+  const recoveredRow = summaryWs.addRow(["Total Recovered (latest entry)", totalRecovered]);
   const netRow = summaryWs.addRow(["Total Net Recoverable", totalNetRecoverable]);
 
   summaryWs.mergeCells(1, 1, 1, 2);
@@ -140,7 +139,7 @@ export async function exportDistrictsToXlsx(districts: CachedDistrict[], pacDues
       ...DUES_FIELD_ORDER.map((f) => (p ? (p[f] as number) : 0)),
       p ? p.openingBalance - p.recoveredThisPeriod : 0,
       p?.netRecoverable ?? 0,
-      p?.period ?? "",
+      p ? formatIST(p.createdAt) : "",
     ];
   });
   const totalRowValues: (string | number)[] = ["TOTAL"];
@@ -170,37 +169,36 @@ export async function exportDistrictsToXlsx(districts: CachedDistrict[], pacDues
   for (const c of moneyCols0) totalRow.getCell(c + 1).numFmt = RUPEE_FORMAT;
   totalRow.eachCell((cell) => styleTotalCell(cell));
 
-  const lockedDistricts = sortedDistricts.filter((d) => latestByDistrict.get(d.id)?.lockStatus === 1);
-  const unlockedDistricts = sortedDistricts.filter((d) => latestByDistrict.get(d.id)?.lockStatus !== 1);
+  const submittedDistricts = sortedDistricts.filter((d) => latestByDistrict.has(d.id));
+  const notStartedDistricts = sortedDistricts.filter((d) => !latestByDistrict.has(d.id));
 
-  const lockWs = wb.addWorksheet("Lock Status", { pageSetup: PAGE_SETUP });
-  lockWs.columns = [{ width: 26 }, { width: 22 }, { width: 26 }, { width: 40 }];
-  lockWs.addRow([`${SITE_TITLE_EN} — Lock Status`]);
-  lockWs.addRow([DATA_PERIOD_EN]);
-  lockWs.mergeCells(1, 1, 1, 4);
-  lockWs.mergeCells(2, 1, 2, 4);
-  styleTitleCell(lockWs.getCell(1, 1));
-  styleSubtitleCell(lockWs.getCell(2, 1));
-  lockWs.addRow([]);
+  const statusWs = wb.addWorksheet("Submission Status", { pageSetup: PAGE_SETUP });
+  statusWs.columns = [{ width: 26 }, { width: 22 }, { width: 26 }];
+  statusWs.addRow([`${SITE_TITLE_EN} — Submission Status`]);
+  statusWs.addRow([DATA_PERIOD_EN]);
+  statusWs.mergeCells(1, 1, 1, 3);
+  statusWs.mergeCells(2, 1, 2, 3);
+  styleTitleCell(statusWs.getCell(1, 1));
+  styleSubtitleCell(statusWs.getCell(2, 1));
+  statusWs.addRow([]);
 
-  lockWs.addRow([`Locked (${lockedDistricts.length})`]).getCell(1).font = { bold: true, size: 12 };
-  const lockedHeaderRow = lockWs.addRow(["District", "Locked At (IST)", "Locked By (DEO Name)", ""]);
-  lockedHeaderRow.eachCell((cell) => styleHeaderCell(cell));
-  for (const d of lockedDistricts) {
+  statusWs.addRow([`Submitted (${submittedDistricts.length})`]).getCell(1).font = { bold: true, size: 12 };
+  const submittedHeaderRow = statusWs.addRow(["District", "Last Submitted (IST)", "Submitted By (DEO Name)"]);
+  submittedHeaderRow.eachCell((cell) => styleHeaderCell(cell));
+  for (const d of submittedDistricts) {
     const p = latestByDistrict.get(d.id);
-    lockWs.addRow([d.districtName, p?.lockedAt ? formatIST(p.lockedAt) : "", p?.submittedByName ?? "", ""]);
+    statusWs.addRow([d.districtName, p ? formatIST(p.createdAt) : "", p?.submittedByName ?? ""]);
   }
-  lockWs.addRow([]);
+  statusWs.addRow([]);
 
-  lockWs.addRow([`Unlocked — Not Yet Submitted This Period (${unlockedDistricts.length})`]).getCell(1).font = {
+  statusWs.addRow([`Not Started (${notStartedDistricts.length})`]).getCell(1).font = {
     bold: true,
     size: 12,
   };
-  const unlockedHeaderRow = lockWs.addRow(["District", "Last Unlocked At (IST)", "Last Unlock Reason", "Unlocked By (Admin)"]);
-  unlockedHeaderRow.eachCell((cell) => styleHeaderCell(cell));
-  for (const d of unlockedDistricts) {
-    const p = latestByDistrict.get(d.id);
-    lockWs.addRow([d.districtName, p?.unlockedAt ? formatIST(p.unlockedAt) : "", p?.unlockReason ?? "", p?.unlockedBy ?? ""]);
+  const notStartedHeaderRow = statusWs.addRow(["District", "", ""]);
+  notStartedHeaderRow.eachCell((cell) => styleHeaderCell(cell));
+  for (const d of notStartedDistricts) {
+    statusWs.addRow([d.districtName, "", ""]);
   }
 
   await downloadWorkbook(wb, `pac-recovery-portal-${istFilenameStamp()}.xlsx`);
@@ -234,8 +232,8 @@ export function exportDistrictsToSql(districts: CachedDistrict[], pacDues: Cache
 
   for (const p of [...pacDues].sort((a, b) => a.id - b.id)) {
     lines.push(
-      `INSERT INTO pac_dues (id, district_id, period, opening_balance, rc_count, rc_amount, rc_details, recovered_this_period, batte_khatte_count, batte_khatte_amount, court_case_count, court_stayed_amount, net_recoverable, lock_status, locked_at, submitted_by_name, unlocked_at, unlock_reason, unlocked_by) VALUES ` +
-        `(${p.id}, ${p.districtId}, ${sqlLiteral(p.period)}, ${p.openingBalance}, ${p.rcCount}, ${p.rcAmount}, ${sqlLiteral(p.rcDetails)}, ${p.recoveredThisPeriod}, ${p.batteKhatteCount}, ${p.batteKhatteAmount}, ${p.courtCaseCount}, ${p.courtStayedAmount}, ${p.netRecoverable}, ${p.lockStatus}, ${sqlLiteral(p.lockedAt)}, ${sqlLiteral(p.submittedByName)}, ${sqlLiteral(p.unlockedAt)}, ${sqlLiteral(p.unlockReason)}, ${sqlLiteral(p.unlockedBy)});`
+      `INSERT INTO pac_dues (id, district_id, opening_balance, rc_count, rc_amount, rc_details, recovered_this_period, batte_khatte_count, batte_khatte_amount, court_case_count, court_stayed_amount, net_recoverable, submitted_by_name, created_at) VALUES ` +
+        `(${p.id}, ${p.districtId}, ${p.openingBalance}, ${p.rcCount}, ${p.rcAmount}, ${sqlLiteral(p.rcDetails)}, ${p.recoveredThisPeriod}, ${p.batteKhatteCount}, ${p.batteKhatteAmount}, ${p.courtCaseCount}, ${p.courtStayedAmount}, ${p.netRecoverable}, ${sqlLiteral(p.submittedByName)}, ${sqlLiteral(p.createdAt)});`
     );
   }
 

@@ -12,13 +12,13 @@ export default function AdminDashboardPage() {
   const { ready, profile, districts, pacDues, sync, syncing, lastSyncedAt, error } = useAdminData();
   const navLinks = adminNavLinks(profile?.isOwner);
 
-  // One row per district, the district's latest pac_dues period — no cross-year summing needed
-  // here, unlike the reference project's 5-FY totals, since this domain has one period per row.
+  // One row per district, the district's latest (highest-id) pac_dues entry — a district can
+  // have arbitrarily many entries in this ledger, not a 5-FY loop or a single period.
   const rows: Row[] = useMemo(() => {
     const latestByDistrict = new Map<number, (typeof pacDues)[number]>();
     for (const p of pacDues) {
       const existing = latestByDistrict.get(p.districtId);
-      if (!existing || p.period > existing.period) latestByDistrict.set(p.districtId, p);
+      if (!existing || p.id > existing.id) latestByDistrict.set(p.districtId, p);
     }
     return districts.map((d) => {
       const p = latestByDistrict.get(d.id);
@@ -31,8 +31,8 @@ export default function AdminDashboardPage() {
         ...values,
         openingBalance: p?.openingBalance ?? 0,
         netRecoverable: p?.netRecoverable ?? 0,
-        lockStatus: p?.lockStatus ?? 0,
-        period: p?.period ?? null,
+        hasSubmissions: p !== undefined,
+        lastSubmittedAt: p?.createdAt ?? null,
       };
     });
   }, [districts, pacDues]);
@@ -59,16 +59,17 @@ export default function AdminDashboardPage() {
       <AppHeader title="Admin Dashboard" role="admin" profile={profile} navLinks={navLinks} onSync={sync} syncing={syncing} lastSyncedAt={lastSyncedAt} districts={districts} />
       <HelpPanel pageKey="admin-dashboard" title="Using this dashboard">
         <p>
-          Every figure here is each district&apos;s most recent recovery period — this portal tracks
-          one open period per district at a time, not a multi-year loop.
+          Every figure here is each district&apos;s most recent submitted recovery entry — a DEO
+          can submit as many entries as they like over time, and this dashboard always reflects
+          the latest one.
         </p>
         <p>
           <strong>Sync</strong> (top right) pulls the latest districts and pac_dues data from
           the server into this browser&apos;s local cache.
         </p>
         <p>
-          Go to <strong>Districts</strong> to view/search all 75 districts, lock or unlock a
-          submission, or export to Excel.
+          Go to <strong>Districts</strong> to view/search all 75 districts, reset a district back
+          to its uploaded baseline, or export to Excel.
         </p>
       </HelpPanel>
       <div className="mx-auto w-full max-w-[1400px] flex-1 px-6 py-6 lg:px-10">

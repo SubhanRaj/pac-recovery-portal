@@ -19,7 +19,7 @@ export function adminNavLinks(isOwner?: boolean): NavLink[] {
   const links: NavLink[] = [
     { label: "Dashboard", href: "/admin" },
     { label: "Districts", href: "/admin/districts" },
-    { label: "Unlock Requests", href: "/admin/unlock-requests" },
+    { label: "Reset Requests", href: "/admin/unlock-requests" },
     { label: "Audit Log", href: "/admin/audit" },
   ];
   if (isOwner) links.push({ label: "Admin Users", href: "/admin/users" });
@@ -114,7 +114,7 @@ export default function AppHeader({ title, role, profile, navLinks, onSync, sync
     router.replace("/login");
   }
 
-  // Only admin pages pass navLinks (Dashboard/Districts/Unlock Requests/Audit Log, plus Sync
+  // Only admin pages pass navLinks (Dashboard/Districts/Reset Requests/Audit Log, plus Sync
   // and the district-jump search). Below `sm` there's no room to fit all of that in one row, so
   // every one of those items — nav links, search, Sync, the theme toggle, the profile pill —
   // moves into this left-side drawer, and the header itself shrinks to just the hamburger +
