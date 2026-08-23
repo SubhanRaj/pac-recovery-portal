@@ -183,3 +183,10 @@ record manually.
   see README's API table). A district reset's `priorEntries` snapshot (see
   [PLAN.md](./PLAN.md)) is the only place a wiped submission survives — if reset history needs to
   outlive 45 days, `RETENTION_DAYS` needs revisiting again.
+
+## Writing docs/commits/comments
+
+Use the `dev-docs-human` skill (`~/.claude/skills/dev-docs-human`) for README/architecture-doc/
+code-comment/PR-description writing — invoke with `/dev-docs-human`, or it triggers automatically
+on dev-facing doc work. Cuts AI narrative tells: before/after story framing, "X, not Y" contrast
+used to explain a design choice, inflated vocabulary, emoji-heading README theater.
