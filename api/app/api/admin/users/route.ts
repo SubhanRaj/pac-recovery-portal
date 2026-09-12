@@ -63,14 +63,18 @@ export const POST = withErrorHandling("admin/users/create", async (req: NextRequ
     .values({ role: "admin", email, name, designation: designation || null })
     .returning({ id: users.id });
 
-  await auditLogInsert(db, {
-    eventType: "admin_user_created",
-    actorRole: "admin",
-    actorEmail: admin.email,
-    actorName: admin.name,
-    actorDesignation: admin.designation,
-    metadata: { newAdminEmail: email, newAdminName: name },
-  });
+  try {
+    await auditLogInsert(db, {
+      eventType: "admin_user_created",
+      actorRole: "admin",
+      actorEmail: admin.email,
+      actorName: admin.name,
+      actorDesignation: admin.designation,
+      metadata: { newAdminEmail: email, newAdminName: name },
+    });
+  } catch (err) {
+    console.error("admin/users/create: audit-log insert failed, account was still created", err);
+  }
 
   return NextResponse.json({ id: created.id });
 });
@@ -120,14 +124,18 @@ export const PATCH = withErrorHandling("admin/users/update", async (req: NextReq
 
   await db.update(users).set(values).where(eq(users.id, targetId));
 
-  await auditLogInsert(db, {
-    eventType: "admin_user_updated",
-    actorRole: "admin",
-    actorEmail: admin.email,
-    actorName: admin.name,
-    actorDesignation: admin.designation,
-    metadata: { targetAdminId: targetId, targetAdminEmail: values.email ?? target.email },
-  });
+  try {
+    await auditLogInsert(db, {
+      eventType: "admin_user_updated",
+      actorRole: "admin",
+      actorEmail: admin.email,
+      actorName: admin.name,
+      actorDesignation: admin.designation,
+      metadata: { targetAdminId: targetId, targetAdminEmail: values.email ?? target.email },
+    });
+  } catch (err) {
+    console.error("admin/users/update: audit-log insert failed, account was still updated", err);
+  }
 
   return NextResponse.json({ ok: true });
 });
@@ -155,14 +163,18 @@ export const DELETE = withErrorHandling("admin/users/delete", async (req: NextRe
     db.delete(users).where(eq(users.id, targetId)),
   ]);
 
-  await auditLogInsert(db, {
-    eventType: "admin_user_deleted",
-    actorRole: "admin",
-    actorEmail: admin.email,
-    actorName: admin.name,
-    actorDesignation: admin.designation,
-    metadata: { deletedAdminEmail: target.email, deletedAdminName: target.name },
-  });
+  try {
+    await auditLogInsert(db, {
+      eventType: "admin_user_deleted",
+      actorRole: "admin",
+      actorEmail: admin.email,
+      actorName: admin.name,
+      actorDesignation: admin.designation,
+      metadata: { deletedAdminEmail: target.email, deletedAdminName: target.name },
+    });
+  } catch (err) {
+    console.error("admin/users/delete: audit-log insert failed, account was still deleted", err);
+  }
 
   return NextResponse.json({ ok: true });
 });

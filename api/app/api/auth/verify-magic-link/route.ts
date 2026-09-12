@@ -42,13 +42,17 @@ export const POST = withErrorHandling("auth/verify-magic-link", async (req: Next
     districtId: user.districtId,
   });
 
-  await auditLogInsert(db, {
-    eventType: "login_magic_link",
-    actorRole: user.role as "deo" | "admin",
-    actorEmail: user.email,
-    actorName: user.name,
-    actorDesignation: user.designation,
-  });
+  try {
+    await auditLogInsert(db, {
+      eventType: "login_magic_link",
+      actorRole: user.role as "deo" | "admin",
+      actorEmail: user.email,
+      actorName: user.name,
+      actorDesignation: user.designation,
+    });
+  } catch (err) {
+    console.error("auth/verify-magic-link: audit-log insert failed, continuing login", err);
+  }
 
   const res = NextResponse.json({ ok: true, role: user.role, districtId: user.districtId });
   setSessionCookie(res, user.role as "deo" | "admin", sessionToken);

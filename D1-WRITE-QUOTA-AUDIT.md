@@ -1,5 +1,10 @@
 # D1 Write-Quota Risk Audit
 
+**Status: fixed.** All four findings below now wrap their non-essential audit-log insert (or, for
+the audit-log GET, the retention purge) in `try/catch` so a D1 write-quota failure there can't
+turn an already-successful essential write into a visible 500. No schema or data change — code
+only.
+
 Triggered by a 2026-09-12 production incident in the sibling `up-excise-spatial-revenue-optimizer`
 project: Cloudflare D1's account-wide daily write-row quota (100,000 rows/day, shared across every
 D1 database on the account) was exhausted, breaking login and other features across that app. Three

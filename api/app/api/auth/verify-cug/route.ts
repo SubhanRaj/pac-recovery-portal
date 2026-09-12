@@ -54,14 +54,18 @@ export const POST = withErrorHandling("auth/verify-cug", async (req: NextRequest
 
   // actorEmail/Name/Designation stay null for DEO logins by design (see audit_log's schema
   // comment) — only meaningful for the rare admin-via-CUG case.
-  await auditLogInsert(db, {
-    eventType: "login_cug",
-    actorRole: row.role as "deo" | "admin",
-    actorEmail: row.role === "admin" ? row.email : null,
-    actorName: row.role === "admin" ? row.name : null,
-    actorDesignation: row.role === "admin" ? row.designation : null,
-    districtName: row.districtName,
-  });
+  try {
+    await auditLogInsert(db, {
+      eventType: "login_cug",
+      actorRole: row.role as "deo" | "admin",
+      actorEmail: row.role === "admin" ? row.email : null,
+      actorName: row.role === "admin" ? row.name : null,
+      actorDesignation: row.role === "admin" ? row.designation : null,
+      districtName: row.districtName,
+    });
+  } catch (err) {
+    console.error("auth/verify-cug: audit-log insert failed, continuing login", err);
+  }
 
   const res = NextResponse.json({ ok: true, role: row.role, districtId: row.districtId });
   setSessionCookie(res, row.role as "deo" | "admin", token);

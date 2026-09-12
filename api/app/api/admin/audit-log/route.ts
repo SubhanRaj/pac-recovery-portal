@@ -20,7 +20,11 @@ export const GET = withErrorHandling("admin/audit-log", async (req: NextRequest)
   // page is the only consumer of the table, so there's no need for the rows to disappear the
   // instant they turn 45 days old, just before the next time anyone actually looks.
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  await db.delete(auditLog).where(lt(auditLog.createdAt, cutoff));
+  try {
+    await db.delete(auditLog).where(lt(auditLog.createdAt, cutoff));
+  } catch (err) {
+    console.error("admin/audit-log: opportunistic purge failed, continuing to read", err);
+  }
 
   const page = Math.max(1, Number(req.nextUrl.searchParams.get("page") ?? 1));
   const rows = await db
